@@ -9,7 +9,6 @@ import {
   chartJSResource,
   chartStyles,
   commonDataSetProps,
-  memoryChartOptions,
 } from '../misc/chart-memory';
 import { getSelectedChartStyleIndex } from '../store/app';
 import { connect } from './StateProvider';
@@ -43,7 +42,6 @@ function MemoryChart({
       datasets: [
         {
           ...commonDataSetProps,
-          ...memoryChartOptions,
           ...chartStyles[styleIdx].inuse,
           label: t('Memory') + ' (sing-box Service API)',
           data: memorySource.inuse,

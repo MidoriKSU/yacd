@@ -15,6 +15,10 @@ export default function useLineChart(
   useEffect(() => {
     const el = document.getElementById(elementId) as HTMLCanvasElement | null;
     if (!el || typeof el.getContext !== 'function') return;
+    const existing = chart.getChart(el);
+    if (existing) {
+      existing.destroy();
+    }
     const ctx = el.getContext('2d');
     if (!ctx) return;
     const options = { ...commonChartOptions, ...extraChartOptions };
@@ -37,6 +41,10 @@ export function useLineChartMemory(
   useEffect(() => {
     const el = document.getElementById(elementId) as HTMLCanvasElement | null;
     if (!el || typeof el.getContext !== 'function') return;
+    const existing = chart.getChart(el);
+    if (existing) {
+      existing.destroy();
+    }
     const ctx = el.getContext('2d');
     if (!ctx) return;
     const options = { ...memoryChartOptions, ...extraChartOptions };
