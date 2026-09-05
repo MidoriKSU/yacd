@@ -8,35 +8,24 @@ import {
   singBoxClient,
   SingBoxSnapshot,
 } from '$src/api/singbox';
-import { State } from '$src/store/types';
-import { ClashAPIConfig } from '$src/types';
+import prettyBytes from '$src/misc/pretty-bytes';
 
-import { getClashAPIConfig } from '../store/app';
 import s0 from './SingBoxStatusCards.module.scss';
-import { connect } from './StateProvider';
 
 const { useState, useEffect } = React;
 
-const mapState = (s: State) => ({
-  apiConfig: getClashAPIConfig(s),
-});
-
-export default connect(mapState)(SingBoxStatusCards);
-
-function SingBoxStatusCards({ apiConfig }: { apiConfig: ClashAPIConfig }) {
+export default function SingBoxStatusCards() {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<SingBoxSnapshot>(() => singBoxClient.getSnapshot());
 
   useEffect(() => {
-    if (apiConfig?.baseURL) {
-      singBoxClient.updateConfig(apiConfig.baseURL, apiConfig.secret || '');
-    }
     return singBoxClient.subscribe((s) => {
       setSnapshot(s);
     });
-  }, [apiConfig]);
+  }, []);
 
   const phaseLabel = {
+    unconfigured: t('unconfigured') || 'Not Configured',
     connected: t('connected') || 'Connected',
     connecting: t('connecting') || 'Connecting...',
     error: snapshot.error || t('auth_failed') || 'Connection Failed',
@@ -51,14 +40,16 @@ function SingBoxStatusCards({ apiConfig }: { apiConfig: ClashAPIConfig }) {
           <span>sing-box Service API ({phaseLabel})</span>
         </div>
         <div className={s0.actions}>
-          <button
-            type="button"
-            className={s0.btn}
-            onClick={() => singBoxClient.reconnect()}
-            title="Reconnect sing-box Service API"
-          >
-            {t('Resume Refresh') || 'Reconnect'}
-          </button>
+          {snapshot.isConfigured && (
+            <button
+              type="button"
+              className={s0.btn}
+              onClick={() => singBoxClient.reconnect()}
+              title="Reconnect sing-box Service API"
+            >
+              {t('Resume Refresh') || 'Reconnect'}
+            </button>
+          )}
           <Link to="/configs" className={s0.btn} title="Configure sing-box Service API">
             {t('Config') || 'Config'}
           </Link>

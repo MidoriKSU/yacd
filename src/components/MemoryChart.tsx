@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom';
 
 import { singBoxClient, SingBoxSnapshot } from '$src/api/singbox';
 import { State } from '$src/store/types';
-import { ClashAPIConfig } from '$src/types';
 
 import { useLineChartMemory } from '../hooks/useLineChart';
 import {
@@ -13,7 +12,7 @@ import {
   commonDataSetProps,
   memoryChartOptions,
 } from '../misc/chart-memory';
-import { getClashAPIConfig, getSelectedChartStyleIndex } from '../store/app';
+import { getSelectedChartStyleIndex } from '../store/app';
 import { connect } from './StateProvider';
 
 const { useState, useEffect, useMemo, useRef } = React;
@@ -35,7 +34,6 @@ const emptyBannerStyle = {
 };
 
 const mapState = (s: State) => ({
-  apiConfig: getClashAPIConfig(s),
   selectedChartStyleIndex: getSelectedChartStyleIndex(s),
 });
 
@@ -44,10 +42,8 @@ export default connect(mapState)(MemoryChart);
 const MAX_POINTS = 60;
 
 function MemoryChart({
-  apiConfig,
   selectedChartStyleIndex,
 }: {
-  apiConfig: ClashAPIConfig;
   selectedChartStyleIndex: number;
 }) {
   const ChartMod = chartJSResource.read();
@@ -73,10 +69,6 @@ function MemoryChart({
   });
 
   useEffect(() => {
-    if (apiConfig?.baseURL) {
-      singBoxClient.updateConfig(apiConfig.baseURL, apiConfig.secret || '');
-    }
-
     return singBoxClient.subscribe((s) => {
       setSnapshot(s);
       if (s.status) {
@@ -88,7 +80,7 @@ function MemoryChart({
         d.listeners.forEach((fn) => fn());
       }
     });
-  }, [apiConfig]);
+  }, []);
 
   const styleIdx = selectedChartStyleIndex % chartStyles.length;
   const data = useMemo(
@@ -108,6 +100,35 @@ function MemoryChart({
   );
 
   useLineChartMemory(ChartMod.Chart, 'MemoryChart', data, chartDataRef.current);
+
+  if (snapshot.phase === 'unconfigured') {
+    return (
+      <div style={emptyBannerStyle}>
+        <p style={{ margin: '0 0 8px 0', fontSize: '1.1em', color: 'var(--color-text)' }}>
+          sing-box Service API ({t('unconfigured') || 'Not Configured'})
+        </p>
+        <p style={{ margin: '0 0 12px 0', fontSize: '0.85em' }}>
+          {t('singbox_not_configured_desc')}
+        </p>
+        <Link
+          to="/configs"
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--color-text-secondary)',
+            color: 'var(--color-text)',
+            padding: '4px 12px',
+            borderRadius: '4px',
+            textDecoration: 'none',
+            fontSize: '0.85em',
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+        >
+          {t('Config') || 'Config'}
+        </Link>
+      </div>
+    );
+  }
 
   if (snapshot.phase === 'disconnected' || snapshot.phase === 'error') {
     return (

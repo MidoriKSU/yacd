@@ -20,7 +20,12 @@ export interface SingBoxMemoryPoint {
   goroutines: number;
 }
 
-export type SingBoxConnectionPhase = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type SingBoxConnectionPhase =
+  | 'unconfigured'
+  | 'connecting'
+  | 'connected'
+  | 'disconnected'
+  | 'error';
 
 export interface SingBoxSnapshot {
   phase: SingBoxConnectionPhase;
@@ -28,14 +33,22 @@ export interface SingBoxSnapshot {
   status: SingBoxStatus | null;
   startedAt: number | null; // epoch ms
   endpoint: string;
-  isCustomEndpoint: boolean;
-  isCustomSecret: boolean;
+  isConfigured: boolean;
   history: SingBoxMemoryPoint[];
 }
 
 export interface SingBoxConfig {
   endpoint: string;
   secret: string;
+}
+
+export function normalizeEndpoint(raw: string): string {
+  let u = (raw || '').trim().replace(/\/+$/, '');
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) {
+    u = 'http://' + u;
+  }
+  return u;
 }
 
 // Format memory bytes using binary prefix (1024 base)
@@ -225,29 +238,37 @@ export class SingBoxClient {
   private listeners = new Set<(snapshot: SingBoxSnapshot) => void>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private phase: SingBoxConnectionPhase = 'disconnected';
+  private phase: SingBoxConnectionPhase = 'unconfigured';
   private error?: string;
   private currentStatus: SingBoxStatus | null = null;
   private startedAt: number | null = null;
   private history: SingBoxMemoryPoint[] = [];
 
-  private currentUrl = '';
-  private currentSecret = '';
-  private customUrl = '';
-  private customSecret = '';
+  private endpoint = '';
+  private secret = '';
 
   constructor() {
     try {
       const stored = localStorage.getItem(STORAGE_CONFIG_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        this.customUrl = (parsed.endpoint || '').trim();
-        this.customSecret = (parsed.secret || '').trim();
+        this.endpoint = normalizeEndpoint(parsed.endpoint || '');
+        this.secret = (parsed.secret || '').trim();
       } else {
-        this.customUrl = (localStorage.getItem(LEGACY_STORAGE_ENDPOINT_KEY) || '').trim();
+        const legacy = localStorage.getItem(LEGACY_STORAGE_ENDPOINT_KEY);
+        if (legacy) {
+          this.endpoint = normalizeEndpoint(legacy);
+        }
       }
     } catch {
       // ignore
+    }
+
+    if (this.endpoint) {
+      this.phase = 'connecting';
+      setTimeout(() => this.startConnection(), 0);
+    } else {
+      this.phase = 'unconfigured';
     }
   }
 
@@ -257,28 +278,27 @@ export class SingBoxClient {
       error: this.error,
       status: this.currentStatus,
       startedAt: this.startedAt,
-      endpoint: this.effectiveUrl(),
-      isCustomEndpoint: Boolean(this.customUrl),
-      isCustomSecret: Boolean(this.customSecret),
+      endpoint: this.endpoint,
+      isConfigured: Boolean(this.endpoint),
       history: this.history,
     };
   }
 
   public getCustomConfig(): SingBoxConfig {
     return {
-      endpoint: this.customUrl,
-      secret: this.customSecret,
+      endpoint: this.endpoint,
+      secret: this.secret,
     };
   }
 
   public setCustomConfig(config: SingBoxConfig) {
-    this.customUrl = (config.endpoint || '').trim();
-    this.customSecret = (config.secret || '').trim();
+    this.endpoint = normalizeEndpoint(config.endpoint);
+    this.secret = (config.secret || '').trim();
     try {
-      if (this.customUrl || this.customSecret) {
+      if (this.endpoint || this.secret) {
         localStorage.setItem(
           STORAGE_CONFIG_KEY,
-          JSON.stringify({ endpoint: this.customUrl, secret: this.customSecret })
+          JSON.stringify({ endpoint: this.endpoint, secret: this.secret })
         );
       } else {
         localStorage.removeItem(STORAGE_CONFIG_KEY);
@@ -288,6 +308,18 @@ export class SingBoxClient {
       // ignore
     }
     this.reconnect();
+  }
+
+  public setCustomEndpoint(url: string) {
+    this.setCustomConfig({ endpoint: url, secret: this.secret });
+  }
+
+  public effectiveUrl(): string {
+    return this.endpoint;
+  }
+
+  public effectiveSecret(): string {
+    return this.secret;
   }
 
   public subscribe(listener: (snapshot: SingBoxSnapshot) => void): () => void {
@@ -310,40 +342,27 @@ export class SingBoxClient {
     }
   }
 
-  public setCustomEndpoint(url: string) {
-    this.setCustomConfig({ endpoint: url, secret: this.customSecret });
-  }
-
-  public effectiveUrl(): string {
-    if (this.customUrl) return this.customUrl;
-    return this.currentUrl;
-  }
-
-  public effectiveSecret(): string {
-    if (this.customSecret) return this.customSecret;
-    return this.currentSecret;
-  }
-
-  public updateConfig(baseURL: string, secret: string) {
-    const normalized = baseURL.trim().replace(/\/+$/, '');
-    if (this.currentUrl !== normalized || this.currentSecret !== secret) {
-      this.currentUrl = normalized;
-      this.currentSecret = secret;
-      this.reconnect();
-    }
-  }
-
   public async testConnection(
-    customUrl?: string,
-    customSecret?: string
+    rawUrl?: string,
+    rawSecret?: string
   ): Promise<{ ok: boolean; message: string; latency?: number }> {
-    const url = (customUrl !== undefined ? customUrl : this.effectiveUrl())
-      .trim()
-      .replace(/\/+$/, '');
-    const secret = (customSecret !== undefined ? customSecret : this.effectiveSecret()).trim();
+    const url = normalizeEndpoint(rawUrl !== undefined ? rawUrl : this.endpoint);
+    const secret = (rawSecret !== undefined ? rawSecret : this.secret).trim();
 
     if (!url) {
       return { ok: false, message: 'Endpoint is empty' };
+    }
+
+    if (
+      typeof window !== 'undefined' &&
+      window.location &&
+      window.location.protocol === 'https:' &&
+      url.startsWith('http:')
+    ) {
+      return {
+        ok: false,
+        message: 'Mixed Content: HTTPS page cannot access HTTP endpoint. Use HTTPS/WSS or access yacd over HTTP.',
+      };
     }
 
     const start = performance.now();
@@ -410,6 +429,14 @@ export class SingBoxClient {
 
   public reconnect() {
     this.cleanup();
+    if (!this.endpoint) {
+      this.phase = 'unconfigured';
+      this.error = undefined;
+      this.currentStatus = null;
+      this.startedAt = null;
+      this.notify();
+      return;
+    }
     this.startConnection();
   }
 
@@ -433,10 +460,22 @@ export class SingBoxClient {
   }
 
   private startConnection() {
-    const targetUrl = this.effectiveUrl();
+    const targetUrl = this.endpoint;
     if (!targetUrl) {
-      this.phase = 'disconnected';
-      this.error = 'No endpoint configured';
+      this.phase = 'unconfigured';
+      this.error = undefined;
+      this.notify();
+      return;
+    }
+
+    if (
+      typeof window !== 'undefined' &&
+      window.location &&
+      window.location.protocol === 'https:' &&
+      targetUrl.startsWith('http:')
+    ) {
+      this.phase = 'error';
+      this.error = 'Mixed Content: HTTPS page cannot access HTTP endpoint';
       this.notify();
       return;
     }
@@ -453,7 +492,9 @@ export class SingBoxClient {
 
   private connectWebSocket(baseUrl: string) {
     try {
-      const wsUrl = baseUrl.replace(/^http/, 'ws') + '/daemon.StartedService/SubscribeStatus';
+      const wsUrl =
+        baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:') +
+        '/daemon.StartedService/SubscribeStatus';
       const ws = new WebSocket(wsUrl, ['grpc-websockets']);
       this.ws = ws;
       ws.binaryType = 'arraybuffer';
@@ -663,6 +704,7 @@ export class SingBoxClient {
   }
 
   private scheduleReconnect() {
+    if (!this.endpoint) return;
     if (this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;

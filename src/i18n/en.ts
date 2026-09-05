@@ -54,4 +54,8 @@ export const data = {
   connecting: 'Connecting...',
   disconnected: 'Disconnected',
   auth_failed: 'Authentication Failed',
+  unconfigured: 'Not Configured',
+  copy_from_clash: 'Fill with Clash Backend Info',
+  clear_config: 'Clear Config',
+  singbox_not_configured_desc: 'Sing-box Service API is not configured. Configure it in Config page to monitor native core status & memory.',
 };

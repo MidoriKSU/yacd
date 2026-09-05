@@ -56,4 +56,8 @@ export const data = {
   connecting: '连接中...',
   disconnected: '已断开',
   auth_failed: '认证失败',
+  unconfigured: '未配置',
+  copy_from_clash: '填入当前 Clash 后端信息',
+  clear_config: '清空配置',
+  singbox_not_configured_desc: 'Sing-box Service API 尚未配置。请在配置页填入端点以监控原生核心状态与内存。',
 };

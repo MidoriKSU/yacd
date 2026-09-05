@@ -5,7 +5,7 @@
   flex-wrap: wrap;
 
   display: grid;
-  grid-template-columns: repeat(auto-fit, 48%);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   grid-gap: 10px;
 
   .sec {

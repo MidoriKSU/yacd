@@ -423,13 +423,23 @@ function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
     setTimeout(() => setIsSaved(false), 2000);
   };
 
-  const handleReset = () => {
+  const handleClear = () => {
     setEndpoint('');
     setSecret('');
     singBoxClient.setCustomConfig({ endpoint: '', secret: '' });
     setIsSaved(true);
     setTestResult(null);
     setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  const handleCopyClash = () => {
+    if (apiConfig?.baseURL) {
+      setEndpoint(apiConfig.baseURL);
+    }
+    if (apiConfig?.secret) {
+      setSecret(apiConfig.secret);
+    }
+    setTestResult(null);
   };
 
   const handleTest = async () => {
@@ -446,6 +456,7 @@ function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
   };
 
   const phaseLabel = {
+    unconfigured: t('unconfigured') || 'Not Configured',
     connected: t('connected') || 'Connected',
     connecting: t('connecting') || 'Connecting...',
     error: snapshot.error || t('auth_failed') || 'Error',
@@ -462,11 +473,9 @@ function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
         <div className={s0.badge}>
           <span className={`${s0.dot} ${s0[snapshot.phase]}`} />
           <span>{phaseLabel}</span>
-          {snapshot.isCustomEndpoint || snapshot.isCustomSecret ? (
-            <span style={{ opacity: 0.7 }}>[Custom]</span>
-          ) : (
-            <span style={{ opacity: 0.7 }}>[Synced with Clash]</span>
-          )}
+          {snapshot.isConfigured && snapshot.endpoint ? (
+            <span style={{ opacity: 0.7 }}>({snapshot.endpoint})</span>
+          ) : null}
         </div>
       </div>
 
@@ -476,9 +485,7 @@ function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
           <Input
             type="text"
             value={endpoint}
-            placeholder={
-              apiConfig?.baseURL ? `${apiConfig.baseURL} (Default)` : 'http://127.0.0.1:9090'
-            }
+            placeholder="http://127.0.0.1:9090"
             onChange={(e) => {
               setEndpoint(e.target.value);
               setTestResult(null);
@@ -486,8 +493,8 @@ function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
           />
           <div className={s0.subInfo}>
             {endpoint
-              ? `Active: ${endpoint}`
-              : `Default: follows Clash backend (${apiConfig?.baseURL || 'not set'})`}
+              ? `Endpoint: ${endpoint}`
+              : t('singbox_not_configured_desc')}
           </div>
         </div>
 
@@ -497,9 +504,7 @@ function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
             <Input
               type={showSecret ? 'text' : 'password'}
               value={secret}
-              placeholder={
-                apiConfig?.secret ? '•••••••• (Default from Clash API)' : 'Bearer secret (optional)'
-              }
+              placeholder="Bearer secret (optional)"
               onChange={(e) => {
                 setSecret(e.target.value);
                 setTestResult(null);
@@ -515,11 +520,7 @@ function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
             </button>
           </div>
           <div className={s0.subInfo}>
-            {secret
-              ? 'Custom secret configured'
-              : apiConfig?.secret
-              ? 'Default: follows Clash API secret'
-              : 'No secret required'}
+            {secret ? 'Custom secret set' : 'No authentication secret set'}
           </div>
         </div>
       </div>
@@ -542,7 +543,10 @@ function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
           label={isSaved ? 'Saved!' : t('save_and_apply')}
           onClick={handleSave}
         />
-        <Button label={t('reset_to_default')} onClick={handleReset} />
+        {apiConfig?.baseURL && (
+          <Button label={t('copy_from_clash')} onClick={handleCopyClash} />
+        )}
+        <Button label={t('clear_config')} onClick={handleClear} />
       </div>
     </div>
   );
