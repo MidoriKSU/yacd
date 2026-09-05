@@ -1,4 +1,4 @@
-import { ClashAPIConfig } from '~/types';
+import { ClashAPIConfig } from '$src/types';
 
 import { buildWebSocketURL, getURLAndInit } from '../misc/request-helper';
 

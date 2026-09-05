@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { State } from '~/store/types';
+import { State } from '$src/store/types';
 
 import { fetchData } from '../api/memory';
 import { useLineChartMemory } from '../hooks/useLineChart';
