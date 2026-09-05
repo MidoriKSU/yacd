@@ -28,7 +28,7 @@ export default function TrafficNow() {
     unconfigured: t('unconfigured') || 'Not Configured',
     connected: t('connected') || 'Connected',
     connecting: t('connecting') || 'Connecting...',
-    error: snapshot.error || t('auth_failed') || 'Connection Failed',
+    error: snapshot.resultState || snapshot.error || 'Connection Failed',
     disconnected: t('disconnected') || 'Disconnected',
   }[snapshot.phase];
 

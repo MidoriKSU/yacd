@@ -120,14 +120,6 @@ function SingBoxConfigSectionImpl({
     setTestResult(null);
   };
 
-  const isHttps =
-    typeof window !== 'undefined' &&
-    window.location &&
-    window.location.protocol === 'https:';
-  const isHttpTarget = /^http:\/\//i.test(endpoint.trim());
-  const showMixedContentWarning =
-    isHttps && isHttpTarget && endpoint.trim().length > 0;
-
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
@@ -137,8 +129,8 @@ function SingBoxConfigSectionImpl({
     } catch (err: any) {
       setTestResult({
         ok: false,
+        resultState: 'Transport Error',
         message: err?.message || 'Connection test failed',
-        errorType: 'unreachable',
       });
     } finally {
       setTesting(false);
@@ -154,22 +146,10 @@ function SingBoxConfigSectionImpl({
       case 'connected':
         return t('connected') || 'Connected';
       case 'error':
-        if (
-          snapshot.error &&
-          (snapshot.error.toLowerCase().includes('auth') ||
-            snapshot.error.includes('401') ||
-            snapshot.error.includes('403'))
-        ) {
-          return t('auth_failed') || 'Authentication failed';
+        if (snapshot.resultState) {
+          return snapshot.resultState;
         }
-        if (
-          snapshot.error &&
-          (snapshot.error.toLowerCase().includes('mixed content') ||
-            snapshot.error === 'Blocked')
-        ) {
-          return t('blocked') || 'Blocked';
-        }
-        return snapshot.error || t('unavailable') || 'Unreachable / unavailable';
+        return snapshot.error || 'Connection error';
       case 'disconnected':
       default:
         return t('disconnected') || 'Disconnected';
@@ -213,27 +193,12 @@ function SingBoxConfigSectionImpl({
           <Input
             type="text"
             value={endpoint}
-            placeholder="https://192.168.1.1:9091"
+            placeholder="http://127.0.0.1:9080"
             onChange={(e) => {
               setEndpoint(e.target.value);
               setTestResult(null);
             }}
           />
-          {showMixedContentWarning && (
-            <div className={s0.mixedContentAlert}>
-              <AlertTriangle size={15} />
-              <div>
-                <div style={{ fontWeight: 600 }}>
-                  {t('mixed_content_title') ||
-                    'HTTPS dashboard cannot access an HTTP Service API.'}
-                </div>
-                <div style={{ marginTop: 2, opacity: 0.9 }}>
-                  {t('mixed_content_desc') ||
-                    'Use HTTPS, or open yacd from the sing-box-hosted external UI.'}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className={s0.fieldGroup}>

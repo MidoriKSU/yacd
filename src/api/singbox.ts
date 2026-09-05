@@ -27,8 +27,18 @@ export type SingBoxConnectionPhase =
   | 'disconnected'
   | 'error';
 
+export type SingBoxResultState =
+  | 'Connected'
+  | 'Authentication Failed'
+  | 'Unreachable'
+  | 'Permission Denied'
+  | 'CORS Blocked'
+  | 'Browser Blocked'
+  | 'Transport Error';
+
 export interface SingBoxSnapshot {
   phase: SingBoxConnectionPhase;
+  resultState?: SingBoxResultState;
   error?: string;
   status: SingBoxStatus | null;
   startedAt: number | null; // epoch ms
@@ -43,12 +53,143 @@ export interface SingBoxConfig {
 }
 
 export function normalizeEndpoint(raw: string): string {
-  let u = (raw || '').trim().replace(/\/+$/, '');
+  let u = (raw || '').trim();
   if (!u) return '';
-  if (!/^https?:\/\//i.test(u)) {
-    u = 'http://' + u;
+  if (/^https?:\/*$/i.test(u)) {
+    return u;
   }
-  return u;
+  u = u.replace(/\/+$/, '');
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(u)) {
+    return u;
+  }
+  return 'http://' + u;
+}
+
+export interface EndpointValidationResult {
+  valid: boolean;
+  error?: string;
+  url?: string;
+  isLoopback?: boolean;
+  isPrivate?: boolean;
+}
+
+export function validateEndpoint(raw: string): EndpointValidationResult {
+  const trimmed = (raw || '').trim();
+  if (!trimmed || /^https?:\/*$/i.test(trimmed)) {
+    return { valid: false, error: 'Endpoint is empty or missing host' };
+  }
+  const normalized = normalizeEndpoint(trimmed);
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return { valid: false, error: 'Invalid URL format' };
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { valid: false, error: 'Unsupported scheme (must be http:// or https://)' };
+  }
+
+  if (!parsed.hostname) {
+    return { valid: false, error: 'Missing host in endpoint URL' };
+  }
+
+  // Strip brackets from IPv6 hostnames like [::1]
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+
+  const isLoopback =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '0:0:0:0:0:0:0:1' ||
+    host.startsWith('127.') ||
+    host.endsWith('.localhost');
+
+  const isPrivate =
+    !isLoopback &&
+    (host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
+      host.endsWith('.local') ||
+      host.startsWith('169.254.') ||
+      host.startsWith('fe80:') ||
+      host.startsWith('fc') ||
+      host.startsWith('fd'));
+
+  return {
+    valid: true,
+    url: normalized,
+    isLoopback,
+    isPrivate,
+  };
+}
+
+export function getTargetAddressSpace(urlStr: string): 'loopback' | 'local' | undefined {
+  const val = validateEndpoint(urlStr);
+  if (!val.valid) return undefined;
+  if (val.isLoopback) return 'loopback';
+  if (val.isPrivate) return 'local';
+  return undefined;
+}
+
+export function getFetchInitWithLNA(init: RequestInit, targetUrl: string): RequestInit {
+  const options: RequestInit = { ...init };
+  const targetSpace = getTargetAddressSpace(targetUrl);
+  // Support W3C Local Network Access / Private Network Access when supported by browser
+  if (
+    targetSpace &&
+    typeof Request !== 'undefined' &&
+    'targetAddressSpace' in Request.prototype
+  ) {
+    (options as any).targetAddressSpace = targetSpace;
+  }
+  return options;
+}
+
+export function classifyRequestError(err: any): { resultState: SingBoxResultState; message: string } {
+  if (err?.name === 'AbortError') {
+    return {
+      resultState: 'Unreachable',
+      message: 'Unreachable: Connection timed out (5s)',
+    };
+  }
+  if (err?.name === 'NotAllowedError') {
+    return {
+      resultState: 'Permission Denied',
+      message: 'Permission Denied: Local network access was not allowed by the browser',
+    };
+  }
+  if (err?.name === 'SecurityError') {
+    return {
+      resultState: 'Browser Blocked',
+      message: err?.message || 'Browser Blocked: Request was blocked by browser security policy',
+    };
+  }
+
+  const msg = (err?.message || '').toLowerCase();
+  if (msg.includes('permission')) {
+    return {
+      resultState: 'Permission Denied',
+      message: `Permission Denied: ${err?.message || 'Local network permission denied'}`,
+    };
+  }
+  if (msg.includes('cors') || msg.includes('cross-origin')) {
+    return {
+      resultState: 'CORS Blocked',
+      message: `CORS Blocked: ${err?.message || 'Cross-Origin Request Blocked'}`,
+    };
+  }
+  if (msg.includes('mixed content') || msg.includes('mixed-content') || msg.includes('blocked by client')) {
+    return {
+      resultState: 'Browser Blocked',
+      message: `Browser Blocked: ${err?.message || 'Insecure request blocked by browser'}`,
+    };
+  }
+
+  return {
+    resultState: 'Unreachable',
+    message: err?.message || 'Unreachable: Connection failed (server offline or port closed)',
+  };
 }
 
 // Format memory bytes using binary prefix (1024 base)
@@ -288,6 +429,7 @@ export class SingBoxClient {
 
   private endpoint = '';
   private secret = '';
+  private resultState?: SingBoxResultState;
 
   constructor() {
     try {
@@ -317,6 +459,7 @@ export class SingBoxClient {
   public getSnapshot(): SingBoxSnapshot {
     return {
       phase: this.phase,
+      resultState: this.resultState,
       error: this.error,
       status: this.currentStatus,
       startedAt: this.startedAt,
@@ -389,26 +532,21 @@ export class SingBoxClient {
     rawSecret?: string
   ): Promise<{
     ok: boolean;
+    resultState: SingBoxResultState;
     message: string;
     latency?: number;
-    errorType?: 'connected' | 'auth_failed' | 'unreachable' | 'invalid_endpoint' | 'service_unavailable' | 'mixed_content';
   }> {
-    const url = normalizeEndpoint(rawUrl !== undefined ? rawUrl : this.endpoint);
-    const secret = (rawSecret !== undefined ? rawSecret : this.secret).trim();
-
-    if (!url) {
-      return { ok: false, message: 'Endpoint is empty', errorType: 'invalid_endpoint' };
-    }
-
-    try {
-      new URL(url);
-    } catch {
+    const raw = rawUrl !== undefined ? rawUrl : this.endpoint;
+    const validation = validateEndpoint(raw);
+    if (!validation.valid || !validation.url) {
       return {
         ok: false,
-        message: 'Invalid endpoint URL format (must be http://... or https://...)',
-        errorType: 'invalid_endpoint',
+        resultState: 'Transport Error',
+        message: validation.error || 'Invalid endpoint URL format',
       };
     }
+    const url = validation.url;
+    const secret = (rawSecret !== undefined ? rawSecret : this.secret).trim();
 
     const start = performance.now();
     try {
@@ -425,12 +563,17 @@ export class SingBoxClient {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      const res = await fetch(httpUrl, {
-        method: 'POST',
-        headers,
-        body: emptyFrame,
-        signal: controller.signal,
-      });
+      const fetchInit = getFetchInitWithLNA(
+        {
+          method: 'POST',
+          headers,
+          body: emptyFrame,
+          signal: controller.signal,
+        },
+        url
+      );
+
+      const res = await fetch(httpUrl, fetchInit);
       clearTimeout(timeoutId);
 
       const elapsed = Math.round(performance.now() - start);
@@ -438,27 +581,28 @@ export class SingBoxClient {
       if (res.status === 401 || res.status === 403) {
         return {
           ok: false,
-          message: `Authentication failed (${res.status}): secret invalid`,
+          resultState: 'Authentication Failed',
+          message: `Authentication Failed (${res.status}): secret invalid`,
           latency: elapsed,
-          errorType: 'auth_failed',
         };
       }
 
       if (res.status === 404) {
         return {
           ok: false,
-          message: 'Service API unavailable (HTTP 404): sing-box Service API is not enabled or path not mapped on this port',
+          resultState: 'Transport Error',
+          message:
+            'Service API unavailable (HTTP 404): sing-box Service API is not enabled or path not mapped on this port',
           latency: elapsed,
-          errorType: 'service_unavailable',
         };
       }
 
       if (!res.ok) {
         return {
           ok: false,
-          message: `Service API unavailable (HTTP ${res.status}): ${res.statusText}`,
+          resultState: 'Transport Error',
+          message: `Transport Error (HTTP ${res.status}): ${res.statusText}`,
           latency: elapsed,
-          errorType: 'service_unavailable',
         };
       }
 
@@ -468,16 +612,16 @@ export class SingBoxClient {
         if (grpcStatus === '16' || grpcStatus === '7') {
           return {
             ok: false,
-            message: `Authentication failed: ${grpcMessage}`,
+            resultState: 'Authentication Failed',
+            message: `Authentication Failed: ${grpcMessage}`,
             latency: elapsed,
-            errorType: 'auth_failed',
           };
         }
         return {
           ok: false,
-          message: `Service API unavailable: ${grpcMessage}`,
+          resultState: 'Transport Error',
+          message: `Transport Error: ${grpcMessage}`,
           latency: elapsed,
-          errorType: 'service_unavailable',
         };
       }
 
@@ -489,35 +633,20 @@ export class SingBoxClient {
       }
       return {
         ok: true,
+        resultState: 'Connected',
         message: startedAt
           ? `Connected (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
           : `Connected (${elapsed}ms)`,
         latency: elapsed,
-        errorType: 'connected',
       };
     } catch (err: any) {
       const elapsed = Math.round(performance.now() - start);
-      if (err.name === 'AbortError') {
-        return {
-          ok: false,
-          message: 'Unreachable: Connection timed out (5s)',
-          latency: elapsed,
-          errorType: 'unreachable',
-        };
-      }
-      if (isHttps && isHttp) {
-        return {
-          ok: false,
-          message: 'Mixed Content: Browser blocked insecure HTTP request from HTTPS. Use HTTPS/WSS or run yacd over HTTP.',
-          latency: elapsed,
-          errorType: 'mixed_content',
-        };
-      }
+      const classified = classifyRequestError(err);
       return {
         ok: false,
-        message: err.message || 'Unreachable: Network error or CORS blocked',
+        resultState: classified.resultState,
+        message: classified.message,
         latency: elapsed,
-        errorType: 'unreachable',
       };
     }
   }
@@ -526,6 +655,7 @@ export class SingBoxClient {
     this.cleanup();
     if (!this.endpoint) {
       this.phase = 'unconfigured';
+      this.resultState = undefined;
       this.error = undefined;
       this.currentStatus = null;
       this.startedAt = null;
@@ -558,12 +688,14 @@ export class SingBoxClient {
     const targetUrl = this.endpoint;
     if (!targetUrl) {
       this.phase = 'unconfigured';
+      this.resultState = undefined;
       this.error = undefined;
       this.notify();
       return;
     }
 
     this.phase = 'connecting';
+    this.resultState = undefined;
     this.error = undefined;
     this.notify();
 
@@ -598,6 +730,7 @@ export class SingBoxClient {
         ws.send(reqPayload);
 
         this.phase = 'connected';
+        this.resultState = 'Connected';
         this.error = undefined;
         this.notify();
       };
@@ -673,12 +806,16 @@ export class SingBoxClient {
       }
 
       const reqPayload = buildSubscribeStatusPayload();
-      const res = await fetch(httpUrl, {
-        method: 'POST',
-        headers,
-        body: reqPayload,
-        signal: controller.signal,
-      });
+      const fetchInit = getFetchInitWithLNA(
+        {
+          method: 'POST',
+          headers,
+          body: reqPayload,
+          signal: controller.signal,
+        },
+        baseUrl
+      );
+      const res = await fetch(httpUrl, fetchInit);
       clearTimeout(connectTimer);
 
       if (!res.ok) {
@@ -693,6 +830,7 @@ export class SingBoxClient {
       }
 
       this.phase = 'connected';
+      this.resultState = 'Connected';
       this.error = undefined;
       this.notify();
 
@@ -737,18 +875,9 @@ export class SingBoxClient {
       clearTimeout(connectTimer);
       if (controller.signal.aborted && this.abortController !== controller) return;
       this.phase = 'error';
-      const isHttps =
-        typeof window !== 'undefined' &&
-        window.location &&
-        window.location.protocol === 'https:';
-      const isHttp = /^http:\/\//i.test(baseUrl);
-      if (isHttps && isHttp) {
-        this.error = 'Mixed Content';
-      } else if (err?.name === 'AbortError') {
-        this.error = 'Connection timed out';
-      } else {
-        this.error = err?.message || 'Connection failed';
-      }
+      const classified = classifyRequestError(err);
+      this.resultState = classified.resultState;
+      this.error = classified.resultState;
       this.notify();
       this.scheduleReconnect();
     }
@@ -769,12 +898,16 @@ export class SingBoxClient {
       }
       // Empty gRPC frame
       const emptyFrame = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]);
-      const res = await fetch(httpUrl, {
-        method: 'POST',
-        headers,
-        body: emptyFrame,
-        signal: controller.signal,
-      });
+      const fetchInit = getFetchInitWithLNA(
+        {
+          method: 'POST',
+          headers,
+          body: emptyFrame,
+          signal: controller.signal,
+        },
+        baseUrl
+      );
+      const res = await fetch(httpUrl, fetchInit);
       if (res.ok) {
         const buf = new Uint8Array(await res.arrayBuffer());
         if (buf.length >= 5) {
