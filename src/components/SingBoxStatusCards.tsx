@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 
 import {
   formatMemoryBytes,
@@ -25,8 +26,6 @@ export default connect(mapState)(SingBoxStatusCards);
 function SingBoxStatusCards({ apiConfig }: { apiConfig: ClashAPIConfig }) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<SingBoxSnapshot>(() => singBoxClient.getSnapshot());
-  const [showConfig, setShowConfig] = useState(false);
-  const [customUrlInput, setCustomUrlInput] = useState(snapshot.endpoint);
 
   useEffect(() => {
     if (apiConfig?.baseURL) {
@@ -34,27 +33,14 @@ function SingBoxStatusCards({ apiConfig }: { apiConfig: ClashAPIConfig }) {
     }
     return singBoxClient.subscribe((s) => {
       setSnapshot(s);
-      setCustomUrlInput(s.endpoint);
     });
   }, [apiConfig]);
 
-  const handleSaveEndpoint = (e: React.FormEvent) => {
-    e.preventDefault();
-    singBoxClient.setCustomEndpoint(customUrlInput);
-    setShowConfig(false);
-  };
-
-  const handleResetEndpoint = () => {
-    singBoxClient.setCustomEndpoint('');
-    setCustomUrlInput(apiConfig?.baseURL || '');
-    setShowConfig(false);
-  };
-
   const phaseLabel = {
-    connected: 'Connected',
-    connecting: 'Connecting...',
-    error: snapshot.error || 'Connection Failed',
-    disconnected: 'Disconnected',
+    connected: t('connected') || 'Connected',
+    connecting: t('connecting') || 'Connecting...',
+    error: snapshot.error || t('auth_failed') || 'Connection Failed',
+    disconnected: t('disconnected') || 'Disconnected',
   }[snapshot.phase];
 
   return (
@@ -73,34 +59,11 @@ function SingBoxStatusCards({ apiConfig }: { apiConfig: ClashAPIConfig }) {
           >
             {t('Resume Refresh') || 'Reconnect'}
           </button>
-          <button
-            type="button"
-            className={s0.btn}
-            onClick={() => setShowConfig(!showConfig)}
-            title="Configure Service API Endpoint"
-          >
-            {showConfig ? 'Close' : 'Endpoint'}
-          </button>
+          <Link to="/configs" className={s0.btn} title="Configure sing-box Service API">
+            {t('Config') || 'Config'}
+          </Link>
         </div>
       </div>
-
-      {showConfig && (
-        <form className={s0.configForm} onSubmit={handleSaveEndpoint}>
-          <span>Service API URL:</span>
-          <input
-            type="text"
-            value={customUrlInput}
-            placeholder="http://127.0.0.1:9090"
-            onChange={(e) => setCustomUrlInput(e.target.value)}
-          />
-          <button type="submit" className={s0.btn}>
-            Save
-          </button>
-          <button type="button" className={s0.btn} onClick={handleResetEndpoint}>
-            Reset to Default
-          </button>
-        </form>
-      )}
 
       <div className={s0.grid}>
         <div className={s0.card}>

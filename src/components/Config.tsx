@@ -1,9 +1,24 @@
 import { useAtom } from 'jotai';
 import { useQuery } from '@tanstack/react-query';
 import * as React from 'react';
-import { DownloadCloud, LogOut, RotateCw, Trash2 } from 'react-feather';
+import {
+  Activity,
+  Check,
+  DownloadCloud,
+  Eye,
+  EyeOff,
+  LogOut,
+  RefreshCw,
+  RotateCw,
+  Server,
+  Trash2,
+} from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import * as logsApi from 'src/api/logs';
+import {
+  singBoxClient,
+  SingBoxSnapshot,
+} from 'src/api/singbox';
 import { fetchVersion } from 'src/api/version';
 import Select from 'src/components/shared/Select';
 import { ClashGeneralConfig, DispatchFn, State } from 'src/store/types';
@@ -367,6 +382,169 @@ function ConfigImpl({
           </label>
         </div>
       </div>
+
+      <div className={s0.sep}>
+        <div />
+      </div>
+
+      <div className={s0.section}>
+        <SingBoxConfigSection apiConfig={apiConfig} />
+      </div>
     </div>
   );
 }
+
+function SingBoxConfigSection({ apiConfig }: { apiConfig: ClashAPIConfig }) {
+  const { t } = useTranslation();
+  const [snapshot, setSnapshot] = useState<SingBoxSnapshot>(() => singBoxClient.getSnapshot());
+  const initialConfig = useRef(singBoxClient.getCustomConfig()).current;
+  const [endpoint, setEndpoint] = useState(initialConfig.endpoint);
+  const [secret, setSecret] = useState(initialConfig.secret);
+  const [showSecret, setShowSecret] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    latency?: number;
+  } | null>(null);
+  const [isSaved, setIsSaved] = useState(false);
+
+  useEffect(() => {
+    return singBoxClient.subscribe((s) => {
+      setSnapshot(s);
+    });
+  }, []);
+
+  const handleSave = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    singBoxClient.setCustomConfig({ endpoint, secret });
+    setIsSaved(true);
+    setTestResult(null);
+    setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  const handleReset = () => {
+    setEndpoint('');
+    setSecret('');
+    singBoxClient.setCustomConfig({ endpoint: '', secret: '' });
+    setIsSaved(true);
+    setTestResult(null);
+    setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await singBoxClient.testConnection(endpoint, secret);
+      setTestResult(res);
+    } catch (err: any) {
+      setTestResult({ ok: false, message: err?.message || 'Test failed' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const phaseLabel = {
+    connected: t('connected') || 'Connected',
+    connecting: t('connecting') || 'Connecting...',
+    error: snapshot.error || t('auth_failed') || 'Error',
+    disconnected: t('disconnected') || 'Disconnected',
+  }[snapshot.phase];
+
+  return (
+    <div className={s0.singboxCard}>
+      <div className={s0.singboxHeader}>
+        <div className={s0.singboxTitle}>
+          <Server size={18} />
+          <span>{t('singbox_service_api')}</span>
+        </div>
+        <div className={s0.badge}>
+          <span className={`${s0.dot} ${s0[snapshot.phase]}`} />
+          <span>{phaseLabel}</span>
+          {snapshot.isCustomEndpoint || snapshot.isCustomSecret ? (
+            <span style={{ opacity: 0.7 }}>[Custom]</span>
+          ) : (
+            <span style={{ opacity: 0.7 }}>[Synced with Clash]</span>
+          )}
+        </div>
+      </div>
+
+      <div className={s0.singboxGrid}>
+        <div>
+          <div className={s0.label}>{t('service_api_endpoint')}</div>
+          <Input
+            type="text"
+            value={endpoint}
+            placeholder={
+              apiConfig?.baseURL ? `${apiConfig.baseURL} (Default)` : 'http://127.0.0.1:9090'
+            }
+            onChange={(e) => {
+              setEndpoint(e.target.value);
+              setTestResult(null);
+            }}
+          />
+          <div className={s0.subInfo}>
+            {endpoint
+              ? `Active: ${endpoint}`
+              : `Default: follows Clash backend (${apiConfig?.baseURL || 'not set'})`}
+          </div>
+        </div>
+
+        <div>
+          <div className={s0.label}>{t('service_api_secret')}</div>
+          <div className={s0.secretWrapper}>
+            <Input
+              type={showSecret ? 'text' : 'password'}
+              value={secret}
+              placeholder={
+                apiConfig?.secret ? '•••••••• (Default from Clash API)' : 'Bearer secret (optional)'
+              }
+              onChange={(e) => {
+                setSecret(e.target.value);
+                setTestResult(null);
+              }}
+            />
+            <button
+              type="button"
+              className={s0.eyeBtn}
+              onClick={() => setShowSecret(!showSecret)}
+              title={showSecret ? 'Hide secret' : 'Show secret'}
+            >
+              {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+          <div className={s0.subInfo}>
+            {secret
+              ? 'Custom secret configured'
+              : apiConfig?.secret
+              ? 'Default: follows Clash API secret'
+              : 'No secret required'}
+          </div>
+        </div>
+      </div>
+
+      {testResult && (
+        <div className={`${s0.testFeedback} ${testResult.ok ? s0.success : s0.error}`}>
+          {testResult.ok ? '✓ ' : '✗ '}
+          {testResult.message}
+        </div>
+      )}
+
+      <div className={s0.singboxActions}>
+        <Button
+          start={testing ? <RefreshCw size={16} className={s0.spin} /> : <Activity size={16} />}
+          label={testing ? 'Testing...' : t('test_connection')}
+          onClick={handleTest}
+        />
+        <Button
+          start={isSaved ? <Check size={16} /> : undefined}
+          label={isSaved ? 'Saved!' : t('save_and_apply')}
+          onClick={handleSave}
+        />
+        <Button label={t('reset_to_default')} onClick={handleReset} />
+      </div>
+    </div>
+  );
+}
+

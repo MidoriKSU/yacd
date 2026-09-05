@@ -29,7 +29,13 @@ export interface SingBoxSnapshot {
   startedAt: number | null; // epoch ms
   endpoint: string;
   isCustomEndpoint: boolean;
+  isCustomSecret: boolean;
   history: SingBoxMemoryPoint[];
+}
+
+export interface SingBoxConfig {
+  endpoint: string;
+  secret: string;
 }
 
 // Format memory bytes using binary prefix (1024 base)
@@ -209,7 +215,8 @@ function buildSubscribeStatusPayload(): Uint8Array {
   return frame;
 }
 
-const STORAGE_ENDPOINT_KEY = 'yacd.singbox.service_endpoint';
+const STORAGE_CONFIG_KEY = 'yacd.singbox.config';
+const LEGACY_STORAGE_ENDPOINT_KEY = 'yacd.singbox.service_endpoint';
 const MAX_HISTORY_POINTS = 60;
 
 export class SingBoxClient {
@@ -227,10 +234,18 @@ export class SingBoxClient {
   private currentUrl = '';
   private currentSecret = '';
   private customUrl = '';
+  private customSecret = '';
 
   constructor() {
     try {
-      this.customUrl = localStorage.getItem(STORAGE_ENDPOINT_KEY) || '';
+      const stored = localStorage.getItem(STORAGE_CONFIG_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        this.customUrl = (parsed.endpoint || '').trim();
+        this.customSecret = (parsed.secret || '').trim();
+      } else {
+        this.customUrl = (localStorage.getItem(LEGACY_STORAGE_ENDPOINT_KEY) || '').trim();
+      }
     } catch {
       // ignore
     }
@@ -244,8 +259,35 @@ export class SingBoxClient {
       startedAt: this.startedAt,
       endpoint: this.effectiveUrl(),
       isCustomEndpoint: Boolean(this.customUrl),
+      isCustomSecret: Boolean(this.customSecret),
       history: this.history,
     };
+  }
+
+  public getCustomConfig(): SingBoxConfig {
+    return {
+      endpoint: this.customUrl,
+      secret: this.customSecret,
+    };
+  }
+
+  public setCustomConfig(config: SingBoxConfig) {
+    this.customUrl = (config.endpoint || '').trim();
+    this.customSecret = (config.secret || '').trim();
+    try {
+      if (this.customUrl || this.customSecret) {
+        localStorage.setItem(
+          STORAGE_CONFIG_KEY,
+          JSON.stringify({ endpoint: this.customUrl, secret: this.customSecret })
+        );
+      } else {
+        localStorage.removeItem(STORAGE_CONFIG_KEY);
+      }
+      localStorage.removeItem(LEGACY_STORAGE_ENDPOINT_KEY);
+    } catch {
+      // ignore
+    }
+    this.reconnect();
   }
 
   public subscribe(listener: (snapshot: SingBoxSnapshot) => void): () => void {
@@ -269,22 +311,17 @@ export class SingBoxClient {
   }
 
   public setCustomEndpoint(url: string) {
-    this.customUrl = url.trim();
-    try {
-      if (this.customUrl) {
-        localStorage.setItem(STORAGE_ENDPOINT_KEY, this.customUrl);
-      } else {
-        localStorage.removeItem(STORAGE_ENDPOINT_KEY);
-      }
-    } catch {
-      // ignore
-    }
-    this.reconnect();
+    this.setCustomConfig({ endpoint: url, secret: this.customSecret });
   }
 
   public effectiveUrl(): string {
     if (this.customUrl) return this.customUrl;
     return this.currentUrl;
+  }
+
+  public effectiveSecret(): string {
+    if (this.customSecret) return this.customSecret;
+    return this.currentSecret;
   }
 
   public updateConfig(baseURL: string, secret: string) {
@@ -293,6 +330,81 @@ export class SingBoxClient {
       this.currentUrl = normalized;
       this.currentSecret = secret;
       this.reconnect();
+    }
+  }
+
+  public async testConnection(
+    customUrl?: string,
+    customSecret?: string
+  ): Promise<{ ok: boolean; message: string; latency?: number }> {
+    const url = (customUrl !== undefined ? customUrl : this.effectiveUrl())
+      .trim()
+      .replace(/\/+$/, '');
+    const secret = (customSecret !== undefined ? customSecret : this.effectiveSecret()).trim();
+
+    if (!url) {
+      return { ok: false, message: 'Endpoint is empty' };
+    }
+
+    const start = performance.now();
+    try {
+      const httpUrl = url + '/daemon.StartedService/GetStartedAt';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/grpc-web+proto',
+        'X-Grpc-Web': '1',
+      };
+      if (secret) {
+        headers['Authorization'] = `Bearer ${secret}`;
+      }
+      const emptyFrame = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const res = await fetch(httpUrl, {
+        method: 'POST',
+        headers,
+        body: emptyFrame,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const elapsed = Math.round(performance.now() - start);
+
+      if (res.status === 401 || res.status === 403) {
+        return {
+          ok: false,
+          message: `Unauthorized (${res.status}): secret invalid`,
+          latency: elapsed,
+        };
+      }
+      if (!res.ok) {
+        return { ok: false, message: `HTTP ${res.status}: ${res.statusText}`, latency: elapsed };
+      }
+
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (buf.length >= 5) {
+        const body = buf.slice(5);
+        const startedAt = decodeStartedAt(body);
+        return {
+          ok: true,
+          message: startedAt
+            ? `OK (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
+            : `OK (${elapsed}ms)`,
+          latency: elapsed,
+        };
+      }
+      return { ok: true, message: `OK (${elapsed}ms)`, latency: elapsed };
+    } catch (err: any) {
+      const elapsed = Math.round(performance.now() - start);
+      if (err.name === 'AbortError') {
+        return { ok: false, message: 'Connection timed out (5s)', latency: elapsed };
+      }
+      return {
+        ok: false,
+        message: err.message || 'Network error or unreachable',
+        latency: elapsed,
+      };
     }
   }
 
@@ -351,8 +463,9 @@ export class SingBoxClient {
       ws.onopen = () => {
         let headers =
           'content-type: application/grpc-web+proto\r\nx-grpc-web: 1\r\naccept-language: en\r\n';
-        if (this.currentSecret) {
-          headers += `authorization: Bearer ${this.currentSecret}\r\n`;
+        const secret = this.effectiveSecret();
+        if (secret) {
+          headers += `authorization: Bearer ${secret}\r\n`;
         }
         headers += '\r\n';
         ws.send(new TextEncoder().encode(headers));
@@ -427,8 +540,9 @@ export class SingBoxClient {
         'Content-Type': 'application/grpc-web+proto',
         'X-Grpc-Web': '1',
       };
-      if (this.currentSecret) {
-        headers['Authorization'] = `Bearer ${this.currentSecret}`;
+      const secret = this.effectiveSecret();
+      if (secret) {
+        headers['Authorization'] = `Bearer ${secret}`;
       }
 
       const reqPayload = buildSubscribeStatusPayload();
@@ -440,6 +554,9 @@ export class SingBoxClient {
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(`Unauthorized (${res.status}): check secret`);
+        }
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
 
@@ -504,8 +621,9 @@ export class SingBoxClient {
         'Content-Type': 'application/grpc-web+proto',
         'X-Grpc-Web': '1',
       };
-      if (this.currentSecret) {
-        headers['Authorization'] = `Bearer ${this.currentSecret}`;
+      const secret = this.effectiveSecret();
+      if (secret) {
+        headers['Authorization'] = `Bearer ${secret}`;
       }
       // Empty gRPC frame
       const emptyFrame = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]);

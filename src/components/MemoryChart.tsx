@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 
 import { singBoxClient, SingBoxSnapshot } from '$src/api/singbox';
 import { State } from '$src/store/types';
@@ -117,20 +118,38 @@ function MemoryChart({
         <p style={{ margin: '0 0 12px 0', fontSize: '0.85em' }}>
           {snapshot.error || `Target: ${snapshot.endpoint}/daemon.StartedService/SubscribeStatus`}
         </p>
-        <button
-          type="button"
-          onClick={() => singBoxClient.reconnect()}
-          style={{
-            background: 'transparent',
-            border: '1px solid var(--color-text-secondary)',
-            color: 'var(--color-text)',
-            padding: '4px 12px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
-        >
-          {t('Resume Refresh') || 'Reconnect'}
-        </button>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+          <button
+            type="button"
+            onClick={() => singBoxClient.reconnect()}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--color-text-secondary)',
+              color: 'var(--color-text)',
+              padding: '4px 12px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            {t('Resume Refresh') || 'Reconnect'}
+          </button>
+          <Link
+            to="/configs"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--color-text-secondary)',
+              color: 'var(--color-text)',
+              padding: '4px 12px',
+              borderRadius: '4px',
+              textDecoration: 'none',
+              fontSize: '0.85em',
+              display: 'inline-flex',
+              alignItems: 'center',
+            }}
+          >
+            {t('Config') || 'Config'}
+          </Link>
+        </div>
       </div>
     );
   }
