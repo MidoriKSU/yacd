@@ -228,6 +228,19 @@ function buildSubscribeStatusPayload(): Uint8Array {
   return frame;
 }
 
+export interface TrafficChartSource {
+  labels: string[];
+  up: number[];
+  down: number[];
+  subscribe: (fn: () => void) => () => void;
+}
+
+export interface MemoryChartSource {
+  labels: string[];
+  inuse: number[];
+  subscribe: (fn: () => void) => () => void;
+}
+
 const STORAGE_CONFIG_KEY = 'yacd.singbox.config';
 const LEGACY_STORAGE_ENDPOINT_KEY = 'yacd.singbox.service_endpoint';
 const MAX_HISTORY_POINTS = 60;
@@ -243,6 +256,35 @@ export class SingBoxClient {
   private currentStatus: SingBoxStatus | null = null;
   private startedAt: number | null = null;
   private history: SingBoxMemoryPoint[] = [];
+
+  private chartListeners = new Set<() => void>();
+  private chartLabels: string[] = Array(MAX_HISTORY_POINTS).fill('');
+  private chartUp: number[] = Array(MAX_HISTORY_POINTS).fill(0);
+  private chartDown: number[] = Array(MAX_HISTORY_POINTS).fill(0);
+  private chartInuse: number[] = Array(MAX_HISTORY_POINTS).fill(0);
+
+  public readonly trafficChartSource: TrafficChartSource = {
+    labels: this.chartLabels,
+    up: this.chartUp,
+    down: this.chartDown,
+    subscribe: (fn: () => void) => {
+      this.chartListeners.add(fn);
+      return () => {
+        this.chartListeners.delete(fn);
+      };
+    },
+  };
+
+  public readonly memoryChartSource: MemoryChartSource = {
+    labels: this.chartLabels,
+    inuse: this.chartInuse,
+    subscribe: (fn: () => void) => {
+      this.chartListeners.add(fn);
+      return () => {
+        this.chartListeners.delete(fn);
+      };
+    },
+  };
 
   private endpoint = '';
   private secret = '';
@@ -700,6 +742,28 @@ export class SingBoxClient {
     if (this.history.length > MAX_HISTORY_POINTS) {
       this.history.shift();
     }
+
+    const timeLabel = new Date(now).toLocaleTimeString();
+    this.chartLabels.shift();
+    this.chartLabels.push(timeLabel);
+
+    this.chartUp.shift();
+    this.chartUp.push(status.uplink);
+
+    this.chartDown.shift();
+    this.chartDown.push(status.downlink);
+
+    this.chartInuse.shift();
+    this.chartInuse.push(status.memory);
+
+    for (const fn of this.chartListeners) {
+      try {
+        fn();
+      } catch {
+        // ignore
+      }
+    }
+
     this.notify();
   }
 

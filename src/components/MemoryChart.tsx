@@ -15,12 +15,11 @@ import {
 import { getSelectedChartStyleIndex } from '../store/app';
 import { connect } from './StateProvider';
 
-const { useState, useEffect, useMemo, useRef } = React;
+const { useState, useEffect, useMemo } = React;
 
 const chartWrapperStyle = {
   position: 'relative' as const,
   maxWidth: 1000,
-  marginTop: '1em',
 };
 
 const emptyBannerStyle = {
@@ -29,7 +28,6 @@ const emptyBannerStyle = {
   backgroundColor: 'var(--color-bg-card)',
   borderRadius: '10px',
   color: 'var(--color-text-secondary)',
-  marginTop: '1em',
   maxWidth: 1000,
 };
 
@@ -38,8 +36,6 @@ const mapState = (s: State) => ({
 });
 
 export default connect(mapState)(MemoryChart);
-
-const MAX_POINTS = 60;
 
 function MemoryChart({
   selectedChartStyleIndex,
@@ -50,62 +46,37 @@ function MemoryChart({
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<SingBoxSnapshot>(() => singBoxClient.getSnapshot());
 
-  const chartDataRef = useRef<{
-    labels: string[];
-    inuse: number[];
-    listeners: Array<() => void>;
-    subscribe: (fn: () => void) => () => void;
-  }>({
-    labels: Array(MAX_POINTS).fill(''),
-    inuse: Array(MAX_POINTS).fill(0),
-    listeners: [],
-    subscribe(fn: () => void) {
-      this.listeners.push(fn);
-      return () => {
-        const idx = this.listeners.indexOf(fn);
-        if (idx > -1) this.listeners.splice(idx, 1);
-      };
-    },
-  });
-
   useEffect(() => {
     return singBoxClient.subscribe((s) => {
       setSnapshot(s);
-      if (s.status) {
-        const d = chartDataRef.current;
-        d.labels.shift();
-        d.inuse.shift();
-        d.labels.push(new Date().toLocaleTimeString());
-        d.inuse.push(s.status.memory);
-        d.listeners.forEach((fn) => fn());
-      }
     });
   }, []);
 
+  const memorySource = singBoxClient.memoryChartSource;
   const styleIdx = selectedChartStyleIndex % chartStyles.length;
   const data = useMemo(
     () => ({
-      labels: chartDataRef.current.labels,
+      labels: memorySource.labels,
       datasets: [
         {
           ...commonDataSetProps,
           ...memoryChartOptions,
           ...chartStyles[styleIdx].inuse,
           label: t('Memory') + ' (sing-box Service API)',
-          data: chartDataRef.current.inuse,
+          data: memorySource.inuse,
         },
       ],
     }),
-    [styleIdx, t]
+    [memorySource, styleIdx, t]
   );
 
-  useLineChartMemory(ChartMod.Chart, 'MemoryChart', data, chartDataRef.current);
+  useLineChartMemory(ChartMod.Chart, 'MemoryChart', data, memorySource);
 
   if (snapshot.phase === 'unconfigured') {
     return (
       <div style={emptyBannerStyle}>
         <p style={{ margin: '0 0 8px 0', fontSize: '1.1em', color: 'var(--color-text)' }}>
-          sing-box Service API ({t('unconfigured') || 'Not Configured'})
+          {t('Memory')} · sing-box Service API ({t('unconfigured') || 'Not Configured'})
         </p>
         <p style={{ margin: '0 0 12px 0', fontSize: '0.85em' }}>
           {t('singbox_not_configured_desc')}
@@ -126,51 +97,6 @@ function MemoryChart({
         >
           {t('Config') || 'Config'}
         </Link>
-      </div>
-    );
-  }
-
-  if (snapshot.phase === 'disconnected' || snapshot.phase === 'error') {
-    return (
-      <div style={emptyBannerStyle}>
-        <p style={{ margin: '0 0 8px 0', fontSize: '1.1em', color: 'var(--color-text)' }}>
-          sing-box Service API ({snapshot.phase === 'error' ? 'Error' : 'Disconnected'})
-        </p>
-        <p style={{ margin: '0 0 12px 0', fontSize: '0.85em' }}>
-          {snapshot.error || `Target: ${snapshot.endpoint}/daemon.StartedService/SubscribeStatus`}
-        </p>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-          <button
-            type="button"
-            onClick={() => singBoxClient.reconnect()}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--color-text-secondary)',
-              color: 'var(--color-text)',
-              padding: '4px 12px',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            {t('Resume Refresh') || 'Reconnect'}
-          </button>
-          <Link
-            to="/configs"
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--color-text-secondary)',
-              color: 'var(--color-text)',
-              padding: '4px 12px',
-              borderRadius: '4px',
-              textDecoration: 'none',
-              fontSize: '0.85em',
-              display: 'inline-flex',
-              alignItems: 'center',
-            }}
-          >
-            {t('Config') || 'Config'}
-          </Link>
-        </div>
       </div>
     );
   }

@@ -1,84 +1,138 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 
-import { State } from '$src/store/types';
-import { ClashAPIConfig } from '$src/types';
+import {
+  formatMemoryBytes,
+  formatUptime,
+  singBoxClient,
+  SingBoxSnapshot,
+} from '$src/api/singbox';
+import prettyBytes from '$src/misc/pretty-bytes';
 
-import * as connAPI from '../api/connections';
-import { fetchData } from '../api/traffic';
-import prettyBytes from '../misc/pretty-bytes';
-import { getClashAPIConfig } from '../store/app';
-import { connect } from './StateProvider';
 import s0 from './TrafficNow.module.scss';
 
-const { useState, useEffect, useCallback } = React;
+const { useState, useEffect } = React;
 
-const mapState = (s: State) => ({
-  apiConfig: getClashAPIConfig(s),
-});
-export default connect(mapState)(TrafficNow);
-
-function TrafficNow({ apiConfig }: { apiConfig: ClashAPIConfig }) {
+export default function TrafficNow() {
   const { t } = useTranslation();
-  const { upStr, downStr } = useSpeed(apiConfig);
-  const { upTotal, dlTotal, connNumber } = useConnection(apiConfig);
+  const [snapshot, setSnapshot] = useState<SingBoxSnapshot>(() => singBoxClient.getSnapshot());
+
+  useEffect(() => {
+    return singBoxClient.subscribe((s) => {
+      setSnapshot(s);
+    });
+  }, []);
+
+  const phaseLabel = {
+    unconfigured: t('unconfigured') || 'Not Configured',
+    connected: t('connected') || 'Connected',
+    connecting: t('connecting') || 'Connecting...',
+    error: snapshot.error || t('auth_failed') || 'Connection Failed',
+    disconnected: t('disconnected') || 'Disconnected',
+  }[snapshot.phase];
+
+  const isUnconfigured = snapshot.phase === 'unconfigured';
+  const isConnecting = snapshot.phase === 'connecting';
+  const isStale = snapshot.phase === 'disconnected' || snapshot.phase === 'error';
+  const status = snapshot.status;
+
+  const getMetric = (type: 'up' | 'down' | 'mem' | 'gr') => {
+    if (isUnconfigured) {
+      return { value: '--', sub: t('unconfigured') || 'Not configured' };
+    }
+    if (status) {
+      const staleNotice = isStale ? ` ⚠️ ${t('stale') || 'Stale'}` : '';
+      switch (type) {
+        case 'up':
+          return {
+            value: prettyBytes(status.uplink) + '/s',
+            sub: `${t('Upload Total') || 'Total'}: ${prettyBytes(status.uplinkTotal)}${staleNotice}`,
+          };
+        case 'down':
+          return {
+            value: prettyBytes(status.downlink) + '/s',
+            sub: `${t('Download Total') || 'Total'}: ${prettyBytes(status.downlinkTotal)}${staleNotice}`,
+          };
+        case 'mem':
+          return {
+            value: formatMemoryBytes(status.memory),
+            sub: isStale ? `⚠️ ${t('stale') || 'Stale'}` : 'Active Memory',
+          };
+        case 'gr':
+          return {
+            value: String(status.goroutines),
+            sub: isStale
+              ? `⚠️ ${t('stale') || 'Stale'}`
+              : `In/Out: ${status.connectionsIn} / ${status.connectionsOut}`,
+          };
+      }
+    }
+    if (isConnecting) {
+      return { value: '...', sub: t('connecting') || 'Connecting...' };
+    }
+    return { value: '--', sub: snapshot.error || t('unavailable') || 'Unavailable' };
+  };
+
+  const upMetric = getMetric('up');
+  const downMetric = getMetric('down');
+  const memMetric = getMetric('mem');
+  const grMetric = getMetric('gr');
+
   return (
-    <div className={s0.TrafficNow}>
-      <div className={s0.sec}>
-        <div>{t('Upload')}</div>
-        <div>{upStr}</div>
+    <div className={s0.root}>
+      <div className={s0.header}>
+        <div className={s0.statusInfo}>
+          <span className={`${s0.dot} ${s0[snapshot.phase]}`} />
+          <span>sing-box Service API ({phaseLabel})</span>
+          {snapshot.startedAt && (
+            <span className={s0.uptime}>
+              · {t('core_uptime') || 'Uptime'}: {formatUptime(snapshot.startedAt)}
+            </span>
+          )}
+        </div>
+        <div className={s0.actions}>
+          {snapshot.isConfigured && (
+            <button
+              type="button"
+              className={s0.btn}
+              onClick={() => singBoxClient.reconnect()}
+              title="Reconnect sing-box Service API"
+            >
+              {t('Resume Refresh') || 'Reconnect'}
+            </button>
+          )}
+          <Link to="/configs" className={s0.btn} title="Configure sing-box Service API">
+            {t('Config') || 'Config'}
+          </Link>
+        </div>
       </div>
-      <div className={s0.sec}>
-        <div>{t('Download')}</div>
-        <div>{downStr}</div>
-      </div>
-      <div className={s0.sec}>
-        <div>{t('Upload Total')}</div>
-        <div>{upTotal}</div>
-      </div>
-      <div className={s0.sec}>
-        <div>{t('Download Total')}</div>
-        <div>{dlTotal}</div>
-      </div>
-      <div className={s0.sec}>
-        <div>{t('Active Connections')}</div>
-        <div>{connNumber}</div>
+
+      <div className={s0.grid}>
+        <div className={s0.card}>
+          <div className={s0.label}>{t('Upload')}</div>
+          <div className={s0.value}>{upMetric.value}</div>
+          <div className={s0.sub}>{upMetric.sub}</div>
+        </div>
+
+        <div className={s0.card}>
+          <div className={s0.label}>{t('Download')}</div>
+          <div className={s0.value}>{downMetric.value}</div>
+          <div className={s0.sub}>{downMetric.sub}</div>
+        </div>
+
+        <div className={s0.card}>
+          <div className={s0.label}>{t('native_memory') || t('Memory') || 'Memory'}</div>
+          <div className={s0.value}>{memMetric.value}</div>
+          <div className={s0.sub}>{memMetric.sub}</div>
+        </div>
+
+        <div className={s0.card}>
+          <div className={s0.label}>{t('goroutines') || 'Goroutines'}</div>
+          <div className={s0.value}>{grMetric.value}</div>
+          <div className={s0.sub}>{grMetric.sub}</div>
+        </div>
       </div>
     </div>
   );
-}
-
-function useSpeed(apiConfig: ClashAPIConfig) {
-  const [speed, setSpeed] = useState({ upStr: '0 B/s', downStr: '0 B/s' });
-  useEffect(() => {
-    return fetchData(apiConfig).subscribe((o) =>
-      setSpeed({
-        upStr: prettyBytes(o.up) + '/s',
-        downStr: prettyBytes(o.down) + '/s',
-      }),
-    );
-  }, [apiConfig]);
-  return speed;
-}
-
-function useConnection(apiConfig: ClashAPIConfig) {
-  const [state, setState] = useState({
-    upTotal: '0 B',
-    dlTotal: '0 B',
-    connNumber: 0,
-  });
-  const read = useCallback(
-    ({ downloadTotal, uploadTotal, connections }) => {
-      setState({
-        upTotal: prettyBytes(uploadTotal),
-        dlTotal: prettyBytes(downloadTotal),
-        connNumber: connections.length,
-      });
-    },
-    [setState],
-  );
-  useEffect(() => {
-    return connAPI.fetchData(apiConfig, read);
-  }, [apiConfig, read]);
-  return state;
 }

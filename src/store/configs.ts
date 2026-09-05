@@ -2,7 +2,6 @@ import { ClashGeneralConfig, DispatchFn, GetStateFn, State, StateConfigs } from 
 import { ClashAPIConfig } from 'src/types';
 
 import * as configsAPI from '../api/configs';
-import * as trafficAPI from '../api/traffic';
 import { openModal } from './modals';
 
 export const getConfigs = (s: State) => s.configs.configs;
@@ -34,12 +33,7 @@ export function fetchConfigs(apiConfig: ClashAPIConfig) {
 
     const haveFetchedConfig = getHaveFetched(getState());
 
-    if (haveFetchedConfig) {
-      // normally user will land on the "traffic chart" page first
-      // calling this here will let the data start streaming
-      // the traffic chart should already subscribed to the streaming
-      trafficAPI.fetchData(apiConfig);
-    } else {
+    if (!haveFetchedConfig) {
       dispatch(markHaveFetchedConfig());
     }
   };
