@@ -66,6 +66,7 @@ export const data = {
   clash_api: 'Clash API',
   clash_api_desc: 'Provides proxy groups, rule providers, connections, and logs management.',
   singbox_service_api_desc: 'Native core telemetry, Memory, Goroutines & Uptime via gRPC-Web.',
-  dismiss_modal: 'Continue to Dashboard',
+  dismiss_modal: 'Continue to Overview',
+  dismiss_modal_hint: 'You can configure either or both APIs above, or proceed to Overview.',
   saved: 'Saved!',
 };

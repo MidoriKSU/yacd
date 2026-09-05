@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { Radio } from 'react-feather';
+import { ArrowRight, Radio } from 'react-feather';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { fetchConfigs } from 'src/api/configs';
 import { BackendList } from 'src/components/BackendList';
 import { SingBoxConfigSection } from 'src/components/SingBoxConfigSection';
@@ -36,13 +37,15 @@ function APIConfig({
   isModalOpen: boolean;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+
   const [baseURL, setBaseURL] = useState('');
   const [secret, setSecret] = useState('');
   const [metaLabel, setMetaLabel] = useState('');
   const [errMsg, setErrMsg] = useState('');
 
   const userTouchedFlagRef = useRef(false);
-  const contentEl = useRef(null);
+  const contentEl = useRef<HTMLDivElement | null>(null);
 
   const handleInputOnChange = useCallback<React.ChangeEventHandler<HTMLInputElement>>((e) => {
     userTouchedFlagRef.current = true;
@@ -89,12 +92,12 @@ function APIConfig({
     [onConfirm],
   );
 
-  const handleDismissModal = useCallback(() => {
+  const handleGoToOverview = useCallback(() => {
     dispatch(closeModal('apiConfig'));
-  }, [dispatch]);
+    navigate('/');
+  }, [dispatch, navigate]);
 
   const detectApiServer = async () => {
-    // if there is already a clash API server at `/`, just use it as default value
     try {
       const res = await fetch('/');
       const data = await res.json();
@@ -115,12 +118,12 @@ function APIConfig({
     <div className={s0.root} ref={contentEl} onKeyDown={handleContentOnKeyDown}>
       <div className={s0.header}>
         <div className={s0.icon}>
-          <SvgYacd width={120} height={120} stroke="var(--stroke)" />
+          <SvgYacd width={110} height={110} stroke="var(--stroke)" />
         </div>
       </div>
 
       {/* Clash API Configuration Section */}
-      <div className={s0.clashSection}>
+      <div className={s0.section}>
         <div className={s0.sectionHeader}>
           <div className={s0.sectionTitle}>
             <Radio size={18} />
@@ -133,7 +136,7 @@ function APIConfig({
         </div>
 
         <div className={s0.body}>
-          <div className={s0.hostnamePort}>
+          <div className={s0.inputsRow}>
             <Field
               id="baseURL"
               name="baseURL"
@@ -153,7 +156,7 @@ function APIConfig({
             />
           </div>
           {errMsg ? <div className={s0.error}>{errMsg}</div> : null}
-          <div className={s0.label}>
+          <div className={s0.labelField}>
             <Field
               id="metaLabel"
               name="metaLabel"
@@ -177,15 +180,20 @@ function APIConfig({
       {/* Sing-box Service API Configuration Section */}
       <SingBoxConfigSection clashAPIConfig={apiConfig} />
 
-      {/* Modal Dismiss Action */}
-      {isModalOpen && (
-        <div className={s0.modalFooter}>
-          <Button
-            label={t('dismiss_modal') || 'Continue to Dashboard'}
-            onClick={handleDismissModal}
-          />
+      {/* Navigation to Overview */}
+      <div className={s0.overviewAction}>
+        <Button
+          start={<ArrowRight size={16} />}
+          label={t('dismiss_modal') || 'Continue to Overview'}
+          onClick={handleGoToOverview}
+        />
+        <div className={s0.overviewHint}>
+          {isModalOpen
+            ? t('dismiss_modal_hint') ||
+              'You can configure either or both APIs above, or proceed to Overview.'
+            : ''}
         </div>
-      )}
+      </div>
     </div>
   );
 }

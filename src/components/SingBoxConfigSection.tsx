@@ -34,6 +34,7 @@ interface SingBoxConfigSectionProps {
   clashAPIConfig?: ClashAPIConfig;
   onConfigSaved?: () => void;
   className?: string;
+  hideHeaderDesc?: boolean;
 }
 
 const mapState = (s: State) => ({
@@ -48,6 +49,7 @@ function SingBoxConfigSectionImpl({
   clashAPIConfig,
   onConfigSaved,
   className,
+  hideHeaderDesc,
 }: SingBoxConfigSectionProps) {
   const { t } = useTranslation();
   const {
@@ -135,13 +137,29 @@ function SingBoxConfigSectionImpl({
     }
   };
 
-  const phaseLabel = {
-    unconfigured: t('unconfigured') || 'Not Configured',
-    connected: t('connected') || 'Connected',
-    connecting: t('connecting') || 'Connecting...',
-    error: snapshot.error || t('auth_failed') || 'Connection Error',
-    disconnected: t('disconnected') || 'Disconnected',
-  }[snapshot.phase];
+  const phaseLabel = (() => {
+    switch (snapshot.phase) {
+      case 'unconfigured':
+        return t('unconfigured') || 'Not configured';
+      case 'connecting':
+        return t('connecting') || 'Connecting';
+      case 'connected':
+        return t('connected') || 'Connected';
+      case 'error':
+        if (
+          snapshot.error &&
+          (snapshot.error.toLowerCase().includes('auth') ||
+            snapshot.error.includes('401') ||
+            snapshot.error.includes('403'))
+        ) {
+          return t('auth_failed') || 'Authentication failed';
+        }
+        return snapshot.error || t('unavailable') || 'Unreachable / unavailable';
+      case 'disconnected':
+      default:
+        return t('disconnected') || 'Disconnected';
+    }
+  })();
 
   const isHttps =
     typeof window !== 'undefined' &&
@@ -162,10 +180,12 @@ function SingBoxConfigSectionImpl({
             <Server size={18} />
             <span>{t('singbox_service_api') || 'sing-box Service API'}</span>
           </div>
-          <div className={s0.desc}>
-            {t('singbox_service_api_desc') ||
-              'Native core telemetry, Memory, Goroutines & Uptime'}
-          </div>
+          {!hideHeaderDesc && (
+            <div className={s0.desc}>
+              {t('singbox_service_api_desc') ||
+                'Native core telemetry, Memory, Goroutines & Uptime via gRPC-Web'}
+            </div>
+          )}
         </div>
         <div className={s0.badge}>
           <span className={`${s0.dot} ${s0[snapshot.phase]}`} />
@@ -181,10 +201,10 @@ function SingBoxConfigSectionImpl({
         </div>
       </div>
 
-      <div className={s0.grid}>
+      <div className={s0.inputsRow}>
         <div className={s0.fieldGroup}>
           <div className={s0.label}>
-            {t('service_api_endpoint') || 'Service API Endpoint'}
+            {t('service_api_endpoint') || 'Service API URL'}
           </div>
           <Input
             type="text"
@@ -199,13 +219,13 @@ function SingBoxConfigSectionImpl({
             {endpoint
               ? `Target: ${endpoint}`
               : t('singbox_not_configured_desc') ||
-                'Enter sing-box Service API endpoint to monitor native telemetry.'}
+                'Enter sing-box Service API URL to monitor native telemetry.'}
           </div>
         </div>
 
         <div className={s0.fieldGroup}>
           <div className={s0.label}>
-            {t('service_api_secret') || 'Service API Secret'}
+            {t('service_api_secret') || 'Secret (optional)'}
           </div>
           <div className={s0.secretWrapper}>
             <Input
@@ -234,7 +254,15 @@ function SingBoxConfigSectionImpl({
 
       {showMixedContentAlert && (
         <div className={s0.mixedContentAlert}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, marginBottom: 4 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontWeight: 600,
+              marginBottom: 4,
+            }}
+          >
             <AlertTriangle size={15} />
             <span>Browser Mixed Content Warning</span>
           </div>
@@ -269,12 +297,12 @@ function SingBoxConfigSectionImpl({
         />
         <Button
           start={isSaved ? <Check size={16} /> : undefined}
-          label={isSaved ? t('saved') || 'Saved!' : t('save_and_apply') || 'Save & Apply'}
+          label={isSaved ? t('saved') || 'Saved!' : t('save_and_apply') || 'Save / Apply'}
           onClick={handleSave}
         />
         {clashAPIConfig?.baseURL && (
           <Button
-            label={t('copy_from_clash') || 'Copy from Clash API'}
+            label={t('copy_from_clash') || 'Copy from Clash'}
             onClick={handleCopyClash}
           />
         )}

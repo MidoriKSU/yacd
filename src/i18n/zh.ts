@@ -68,6 +68,7 @@ export const data = {
   clash_api: 'Clash API',
   clash_api_desc: '提供代理组、规则集、连接与日志管理。',
   singbox_service_api_desc: '通过 gRPC-Web 提供原生核心遥测、内存用量、Goroutines 协程与运行时长。',
-  dismiss_modal: '进入仪表盘',
+  dismiss_modal: '进入控制面板 (Overview)',
+  dismiss_modal_hint: '您可以在上方分别配置任一或两套 API，也可以直接进入控制面板。',
   saved: '已保存!',
 };

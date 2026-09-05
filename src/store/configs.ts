@@ -15,13 +15,21 @@ export function fetchConfigs(apiConfig: ClashAPIConfig) {
       res = await configsAPI.fetchConfigs(apiConfig);
     } catch (err) {
       // TypeError and AbortError
-      dispatch(openModal('apiConfig'));
+      const state = getState();
+      const hasSingBox = Boolean(state.app.singBoxConfig?.endpoint);
+      if (!hasSingBox) {
+        dispatch(openModal('apiConfig'));
+      }
       return;
     }
 
     if (!res.ok) {
       console.log('Error fetch configs', res.statusText);
-      dispatch(openModal('apiConfig'));
+      const state = getState();
+      const hasSingBox = Boolean(state.app.singBoxConfig?.endpoint);
+      if (!hasSingBox) {
+        dispatch(openModal('apiConfig'));
+      }
       return;
     }
 
