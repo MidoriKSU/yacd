@@ -58,4 +58,9 @@ export const data = {
   copy_from_clash: 'Fill with Clash Backend Info',
   clear_config: 'Clear Config',
   singbox_not_configured_desc: 'Sing-box Service API is not configured. Configure it in Config page to monitor native core status & memory.',
+  unavailable: 'Unavailable',
+  stale: 'Disconnected / Stale',
+  goroutines: 'Goroutines',
+  core_uptime: 'Core Uptime',
+  native_memory: 'Native Memory',
 };

@@ -60,4 +60,9 @@ export const data = {
   copy_from_clash: '填入当前 Clash 后端信息',
   clear_config: '清空配置',
   singbox_not_configured_desc: 'Sing-box Service API 尚未配置。请在配置页填入端点以监控原生核心状态与内存。',
+  unavailable: '不可用',
+  stale: '已断开 (旧缓存)',
+  goroutines: 'Goroutines 协程',
+  core_uptime: '核心运行时长',
+  native_memory: '原生内存 (Memory)',
 };

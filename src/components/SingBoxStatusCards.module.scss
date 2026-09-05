@@ -39,6 +39,9 @@
   &.disconnected {
     background-color: #757575;
   }
+  &.unconfigured {
+    background-color: #9e9e9e;
+  }
 }
 
 .actions {

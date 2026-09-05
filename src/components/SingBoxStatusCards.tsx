@@ -32,6 +32,67 @@ export default function SingBoxStatusCards() {
     disconnected: t('disconnected') || 'Disconnected',
   }[snapshot.phase];
 
+  const isUnconfigured = snapshot.phase === 'unconfigured';
+  const isStale = snapshot.phase === 'disconnected' || snapshot.phase === 'error';
+
+  const getMemoryDisplay = () => {
+    if (isUnconfigured) {
+      return { value: t('unconfigured') || 'Not configured', sub: t('singbox_service_api') };
+    }
+    if (snapshot.status) {
+      const val = formatMemoryBytes(snapshot.status.memory);
+      if (isStale) return { value: val, sub: `⚠️ ${t('stale') || 'Disconnected / Stale'}` };
+      return { value: val, sub: `daemon.Status (Raw: ${snapshot.status.memoryRaw} B)` };
+    }
+    return { value: t('unavailable') || 'Unavailable', sub: snapshot.error || 'Connection Failed' };
+  };
+
+  const getGoroutinesDisplay = () => {
+    if (isUnconfigured) {
+      return { value: t('unconfigured') || 'Not configured', sub: t('singbox_service_api') };
+    }
+    if (snapshot.status) {
+      const val = String(snapshot.status.goroutines);
+      if (isStale) return { value: val, sub: `⚠️ ${t('stale') || 'Disconnected / Stale'}` };
+      return { value: val, sub: 'Active Go routines' };
+    }
+    return { value: t('unavailable') || 'Unavailable', sub: snapshot.error || 'Connection Failed' };
+  };
+
+  const getUptimeDisplay = () => {
+    if (isUnconfigured) {
+      return { value: t('unconfigured') || 'Not configured', sub: t('singbox_service_api') };
+    }
+    if (snapshot.startedAt) {
+      const val = formatUptime(snapshot.startedAt);
+      if (isStale) return { value: val, sub: `⚠️ ${t('stale') || 'Disconnected / Stale'}` };
+      return { value: val, sub: `Started: ${new Date(snapshot.startedAt).toLocaleTimeString()}` };
+    }
+    return { value: t('unavailable') || 'Unavailable', sub: snapshot.error || 'Connection Failed' };
+  };
+
+  const getConnectionsDisplay = () => {
+    if (isUnconfigured) {
+      return { value: t('unconfigured') || 'Not configured', sub: t('singbox_service_api') };
+    }
+    if (snapshot.status) {
+      const val = `${snapshot.status.connectionsIn} / ${snapshot.status.connectionsOut}`;
+      if (isStale) return { value: val, sub: `⚠️ ${t('stale') || 'Disconnected / Stale'}` };
+      return {
+        value: val,
+        sub: snapshot.status.trafficAvailable
+          ? `Traffic: ↑${prettyBytes(snapshot.status.uplinkTotal)} ↓${prettyBytes(snapshot.status.downlinkTotal)}`
+          : 'Service API native track',
+      };
+    }
+    return { value: t('unavailable') || 'Unavailable', sub: snapshot.error || 'Connection Failed' };
+  };
+
+  const mem = getMemoryDisplay();
+  const gr = getGoroutinesDisplay();
+  const up = getUptimeDisplay();
+  const conn = getConnectionsDisplay();
+
   return (
     <div className={s0.root}>
       <div className={s0.header}>
@@ -58,39 +119,27 @@ export default function SingBoxStatusCards() {
 
       <div className={s0.grid}>
         <div className={s0.card}>
-          <div className={s0.label}>{t('Memory') || 'Native Memory'}</div>
-          <div className={s0.value}>
-            {snapshot.status ? formatMemoryBytes(snapshot.status.memory) : '—'}
-          </div>
-          <div className={s0.sub}>
-            {snapshot.status ? `Raw: ${snapshot.status.memoryRaw} B` : 'sing-box daemon.Status'}
-          </div>
+          <div className={s0.label}>{t('native_memory') || t('Memory') || 'Memory'}</div>
+          <div className={s0.value}>{mem.value}</div>
+          <div className={s0.sub}>{mem.sub}</div>
         </div>
 
         <div className={s0.card}>
-          <div className={s0.label}>Goroutines</div>
-          <div className={s0.value}>{snapshot.status ? snapshot.status.goroutines : '—'}</div>
-          <div className={s0.sub}>Active Go routines</div>
+          <div className={s0.label}>{t('goroutines') || 'Goroutines'}</div>
+          <div className={s0.value}>{gr.value}</div>
+          <div className={s0.sub}>{gr.sub}</div>
         </div>
 
         <div className={s0.card}>
-          <div className={s0.label}>Core Uptime</div>
-          <div className={s0.value}>
-            {snapshot.startedAt ? formatUptime(snapshot.startedAt) : '—'}
-          </div>
-          <div className={s0.sub}>
-            {snapshot.startedAt ? new Date(snapshot.startedAt).toLocaleTimeString() : 'StartedAt'}
-          </div>
+          <div className={s0.label}>{t('core_uptime') || 'Core Uptime'}</div>
+          <div className={s0.value}>{up.value}</div>
+          <div className={s0.sub}>{up.sub}</div>
         </div>
 
         <div className={s0.card}>
           <div className={s0.label}>Connections (In / Out)</div>
-          <div className={s0.value}>
-            {snapshot.status
-              ? `${snapshot.status.connectionsIn} / ${snapshot.status.connectionsOut}`
-              : '—'}
-          </div>
-          <div className={s0.sub}>Service API native track</div>
+          <div className={s0.value}>{conn.value}</div>
+          <div className={s0.sub}>{conn.sub}</div>
         </div>
       </div>
     </div>
