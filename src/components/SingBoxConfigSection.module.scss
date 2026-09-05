@@ -73,7 +73,8 @@
     background-color: #ed6c02;
     box-shadow: 0 0 6px #ed6c02;
   }
-  &.error {
+  &.error,
+  &.blocked {
     background-color: #d32f2f;
     box-shadow: 0 0 6px #d32f2f;
   }
@@ -159,8 +160,8 @@
 }
 
 .mixedContentAlert {
-  margin-top: 12px;
-  padding: 10px 12px;
+  margin-top: 8px;
+  padding: 8px 12px;
   border-radius: 6px;
   font-size: 0.82em;
   line-height: 1.4;
@@ -168,6 +169,14 @@
   color: #ffb74d;
   border: 1px solid rgba(237, 108, 2, 0.35);
   word-break: break-word;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+
+  svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
 }
 
 .testFeedback {

@@ -412,12 +412,11 @@ export class SingBoxClient {
 
     const isHttps = typeof window !== 'undefined' && window.location && window.location.protocol === 'https:';
     const isHttp = /^http:\/\//i.test(url);
-    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(url);
 
-    if (isHttps && isHttp && !isLocalhost) {
+    if (isHttps && isHttp) {
       return {
         ok: false,
-        message: 'Mixed Content: Browser blocks HTTPS page from accessing plain HTTP LAN endpoint. Use HTTPS/WSS or access yacd over HTTP.',
+        message: 'HTTPS dashboard cannot access an HTTP Service API. Use HTTPS, or open yacd from the sing-box-hosted external UI.',
         errorType: 'mixed_content',
       };
     }
@@ -582,7 +581,7 @@ export class SingBoxClient {
       targetUrl.startsWith('http:')
     ) {
       this.phase = 'error';
-      this.error = 'Mixed Content: HTTPS page cannot access HTTP endpoint';
+      this.error = 'Blocked';
       this.notify();
       return;
     }

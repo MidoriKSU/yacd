@@ -120,7 +120,24 @@ function SingBoxConfigSectionImpl({
     setTestResult(null);
   };
 
+  const isHttps =
+    typeof window !== 'undefined' &&
+    window.location &&
+    window.location.protocol === 'https:';
+  const isHttpTarget = /^http:\/\//i.test(endpoint.trim());
+  const isBlocked = isHttps && isHttpTarget && endpoint.trim().length > 0;
+
   const handleTest = async () => {
+    if (isBlocked) {
+      setTestResult({
+        ok: false,
+        message:
+          t('mixed_content_title') ||
+          'HTTPS dashboard cannot access an HTTP Service API. Use HTTPS, or open yacd from the sing-box-hosted external UI.',
+        errorType: 'blocked',
+      });
+      return;
+    }
     setTesting(true);
     setTestResult(null);
     try {
@@ -138,6 +155,9 @@ function SingBoxConfigSectionImpl({
   };
 
   const phaseLabel = (() => {
+    if (isBlocked) {
+      return t('blocked') || 'Blocked';
+    }
     switch (snapshot.phase) {
       case 'unconfigured':
         return t('unconfigured') || 'Not configured';
@@ -154,23 +174,15 @@ function SingBoxConfigSectionImpl({
         ) {
           return t('auth_failed') || 'Authentication failed';
         }
+        if (snapshot.error === 'Blocked') {
+          return t('blocked') || 'Blocked';
+        }
         return snapshot.error || t('unavailable') || 'Unreachable / unavailable';
       case 'disconnected':
       default:
         return t('disconnected') || 'Disconnected';
     }
   })();
-
-  const isHttps =
-    typeof window !== 'undefined' &&
-    window.location &&
-    window.location.protocol === 'https:';
-  const isHttpTarget = /^http:\/\//i.test(endpoint.trim());
-  const isLocalhostTarget = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(
-    endpoint.trim()
-  );
-  const showMixedContentAlert =
-    isHttps && isHttpTarget && !isLocalhostTarget && endpoint.trim().length > 0;
 
   return (
     <div className={cx(s0.card, className)}>
@@ -181,7 +193,7 @@ function SingBoxConfigSectionImpl({
             <span>{t('singbox_service_api') || 'sing-box Service API'}</span>
           </div>
           <div className={s0.badge}>
-            <span className={`${s0.dot} ${s0[snapshot.phase]}`} />
+            <span className={cx(s0.dot, isBlocked ? s0.blocked : s0[snapshot.phase])} />
             <span>{phaseLabel}</span>
             {snapshot.isConfigured && snapshot.endpoint ? (
               <span className={s0.badgeEndpoint}>({snapshot.endpoint})</span>
@@ -204,7 +216,7 @@ function SingBoxConfigSectionImpl({
       <div className={s0.inputsRow}>
         <div className={s0.fieldGroup}>
           <div className={s0.label}>
-            {t('service_api_endpoint') || 'Service API URL'}
+            {t('service_api_endpoint') || 'Service API Endpoint'}
           </div>
           <Input
             type="text"
@@ -215,11 +227,26 @@ function SingBoxConfigSectionImpl({
               setTestResult(null);
             }}
           />
+          {isBlocked && (
+            <div className={s0.mixedContentAlert}>
+              <AlertTriangle size={15} />
+              <div>
+                <div style={{ fontWeight: 600 }}>
+                  {t('mixed_content_title') ||
+                    'HTTPS dashboard cannot access an HTTP Service API.'}
+                </div>
+                <div style={{ marginTop: 2, opacity: 0.9 }}>
+                  {t('mixed_content_desc') ||
+                    'Use HTTPS, or open yacd from the sing-box-hosted external UI.'}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className={s0.fieldGroup}>
           <div className={s0.label}>
-            {t('service_api_secret') || 'Secret (optional)'}
+            {t('service_api_secret') || 'Service API Secret'}
           </div>
           <div className={s0.secretWrapper}>
             <Input
@@ -245,26 +272,6 @@ function SingBoxConfigSectionImpl({
           ) : null}
         </div>
       </div>
-
-      {showMixedContentAlert && (
-        <div className={s0.mixedContentAlert}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontWeight: 600,
-              marginBottom: 4,
-            }}
-          >
-            <AlertTriangle size={15} />
-            <span>Browser Mixed Content Warning</span>
-          </div>
-          <span>
-            You are browsing yacd via HTTPS (<code>https://midoriksu.github.io</code>). Web browsers block HTTPS pages from calling plain HTTP LAN endpoints directly. Please configure HTTPS/TLS (or reverse proxy) for sing-box, or access yacd locally over HTTP.
-          </span>
-        </div>
-      )}
 
       {testResult && (
         <div
@@ -296,14 +303,14 @@ function SingBoxConfigSectionImpl({
         />
         {clashAPIConfig?.baseURL && (
           <Button
-            label={t('copy_from_clash') || 'Copy from Clash'}
+            label={t('copy_from_clash') || 'Use Clash Backend'}
             onClick={handleCopyClash}
           />
         )}
         {snapshot.isConfigured && (
           <Button
             start={<Trash2 size={16} />}
-            label={t('clear_config') || 'Clear'}
+            label={t('clear_config') || 'Clear Config'}
             onClick={handleClear}
           />
         )}
