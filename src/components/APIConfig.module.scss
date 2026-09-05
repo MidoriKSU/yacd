@@ -2,6 +2,7 @@
   width: 100%;
   max-width: 580px;
   margin: 0 auto;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
 
   &:focus {

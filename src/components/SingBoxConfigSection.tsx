@@ -175,30 +175,30 @@ function SingBoxConfigSectionImpl({
   return (
     <div className={cx(s0.card, className)}>
       <div className={s0.header}>
-        <div>
+        <div className={s0.headerRow}>
           <div className={s0.title}>
             <Server size={18} />
             <span>{t('singbox_service_api') || 'sing-box Service API'}</span>
           </div>
-          {!hideHeaderDesc && (
-            <div className={s0.desc}>
-              {t('singbox_service_api_desc') ||
-                'Native core telemetry, Memory, Goroutines & Uptime via gRPC-Web'}
-            </div>
-          )}
+          <div className={s0.badge}>
+            <span className={`${s0.dot} ${s0[snapshot.phase]}`} />
+            <span>{phaseLabel}</span>
+            {snapshot.isConfigured && snapshot.endpoint ? (
+              <span className={s0.badgeEndpoint}>({snapshot.endpoint})</span>
+            ) : null}
+            {snapshot.startedAt ? (
+              <span className={s0.badgeUptime}>
+                · {formatUptime(snapshot.startedAt)}
+              </span>
+            ) : null}
+          </div>
         </div>
-        <div className={s0.badge}>
-          <span className={`${s0.dot} ${s0[snapshot.phase]}`} />
-          <span>{phaseLabel}</span>
-          {snapshot.isConfigured && snapshot.endpoint ? (
-            <span style={{ opacity: 0.7 }}>({snapshot.endpoint})</span>
-          ) : null}
-          {snapshot.startedAt ? (
-            <span style={{ opacity: 0.7 }}>
-              · {formatUptime(snapshot.startedAt)}
-            </span>
-          ) : null}
-        </div>
+        {!hideHeaderDesc && (
+          <div className={s0.desc}>
+            {t('singbox_service_api_desc') ||
+              'Native runtime telemetry via gRPC-Web.'}
+          </div>
+        )}
       </div>
 
       <div className={s0.inputsRow}>
@@ -209,18 +209,12 @@ function SingBoxConfigSectionImpl({
           <Input
             type="text"
             value={endpoint}
-            placeholder="http://127.0.0.1:9090 or https://192.168.1.1:9091"
+            placeholder="https://192.168.1.1:9091"
             onChange={(e) => {
               setEndpoint(e.target.value);
               setTestResult(null);
             }}
           />
-          <div className={s0.subInfo}>
-            {endpoint
-              ? `Target: ${endpoint}`
-              : t('singbox_not_configured_desc') ||
-                'Enter sing-box Service API URL to monitor native telemetry.'}
-          </div>
         </div>
 
         <div className={s0.fieldGroup}>
@@ -246,9 +240,9 @@ function SingBoxConfigSectionImpl({
               {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          <div className={s0.subInfo}>
-            {secret ? 'Authentication secret set' : 'No authentication secret set'}
-          </div>
+          {secret ? (
+            <div className={s0.subInfo}>Authentication secret set</div>
+          ) : null}
         </div>
       </div>
 
