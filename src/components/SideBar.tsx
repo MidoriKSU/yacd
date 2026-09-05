@@ -1,12 +1,11 @@
 import { Tooltip } from '@reach/tooltip';
+import { useQuery } from '@tanstack/react-query';
 import cx from 'clsx';
 import * as React from 'react';
 import { Info } from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import { FcAreaChart, FcDocument, FcGlobe, FcLink, FcRuler, FcSettings } from 'react-icons/fc';
-import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
-
 import { fetchVersion } from 'src/api/version';
 import { ThemeSwitcher } from 'src/components/shared/ThemeSwitcher';
 import { connect } from 'src/components/StateProvider';

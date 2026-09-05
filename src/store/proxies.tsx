@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { fetchVersion } from 'src/api/version';  // 导入 fetchVersion
 import {
   DelayMapping,
   DispatchFn,
@@ -16,7 +17,6 @@ import { ClashAPIConfig } from 'src/types';
 
 import * as connAPI from '../api/connections';
 import * as proxiesAPI from '../api/proxies';
-import { fetchVersion } from 'src/api/version';  // 导入 fetchVersion
 import { getAutoCloseOldConns, getLatencyTestUrl } from './app';
 
 export const initialState: StateProxies = {

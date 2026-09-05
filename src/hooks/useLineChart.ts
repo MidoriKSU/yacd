@@ -13,7 +13,10 @@ export default function useLineChart(
   extraChartOptions = {},
 ) {
   useEffect(() => {
-    const ctx = (document.getElementById(elementId) as HTMLCanvasElement).getContext('2d');
+    const el = document.getElementById(elementId) as HTMLCanvasElement | null;
+    if (!el || typeof el.getContext !== 'function') return;
+    const ctx = el.getContext('2d');
+    if (!ctx) return;
     const options = { ...commonChartOptions, ...extraChartOptions };
     const c = new chart(ctx, { type: 'line', data, options });
     const unsubscribe = subscription && subscription.subscribe(() => c.update());
@@ -32,7 +35,10 @@ export function useLineChartMemory(
   extraChartOptions = {}
 ) {
   useEffect(() => {
-    const ctx = (document.getElementById(elementId) as HTMLCanvasElement).getContext('2d');
+    const el = document.getElementById(elementId) as HTMLCanvasElement | null;
+    if (!el || typeof el.getContext !== 'function') return;
+    const ctx = el.getContext('2d');
+    if (!ctx) return;
     const options = { ...memoryChartOptions, ...extraChartOptions };
     const c = new chart(ctx, { type: 'line', data, options });
     const unsubscribe = subscription && subscription.subscribe(() => c.update());
