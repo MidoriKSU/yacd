@@ -88,10 +88,11 @@ export function fetchData(apiConfig: ClashAPIConfig, listener: unknown): Unsubsc
 }
 
 function subscribe(listener: unknown): UnsubscribeFn {
-  subscribers.push(listener);
+  const x = subscribers.indexOf(listener);
+  if (x < 0) subscribers.push(listener);
   return function unsubscribe() {
     const idx = subscribers.indexOf(listener);
-    subscribers.splice(idx, 1);
+    if (idx > -1) subscribers.splice(idx, 1);
   };
 }
 

@@ -30,10 +30,12 @@ const traffic = {
   },
 
   subscribe(listener: (x: any) => void) {
-    this.subscribers.push(listener);
+    if (this.subscribers.indexOf(listener) < 0) {
+      this.subscribers.push(listener);
+    }
     return () => {
       const idx = this.subscribers.indexOf(listener);
-      this.subscribers.splice(idx, 1);
+      if (idx > -1) this.subscribers.splice(idx, 1);
     };
   },
 };
