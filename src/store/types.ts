@@ -1,9 +1,12 @@
 import type { ClashAPIConfig } from 'src/types';
 
+import type { SingBoxConfig } from '$src/api/singbox';
+
 export type ClashAPIConfigWithAddedAt = ClashAPIConfig & { addedAt?: number };
 export type StateApp = {
   selectedClashAPIConfigIndex: number;
   clashAPIConfigs: ClashAPIConfigWithAddedAt[];
+  singBoxConfig?: SingBoxConfig;
 
   latencyTestUrl: string;
   selectedChartStyleIndex: number;

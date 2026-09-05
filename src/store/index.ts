@@ -1,10 +1,12 @@
 import {
+  clearSingBoxConfig,
   initialState as app,
   removeClashAPIConfig,
   selectChartStyleIndex,
   selectClashAPIConfig,
   updateAppConfig,
   updateCollapsibleIsOpen,
+  updateSingBoxConfig,
 } from './app';
 import { initialState as configs } from './configs';
 import { initialState as logs } from './logs';
@@ -28,6 +30,8 @@ export const actions = {
     updateAppConfig,
     removeClashAPIConfig,
     selectClashAPIConfig,
+    updateSingBoxConfig,
+    clearSingBoxConfig,
   },
   proxies: proxiesActions,
 };

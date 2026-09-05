@@ -1,4 +1,8 @@
 .root {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 10px 0 20px;
+
   &:focus {
     outline: none;
   }
@@ -8,6 +12,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
+  margin-bottom: 8px;
 
   .icon {
     --stroke: #f3f3f3;
@@ -20,33 +25,74 @@
   }
 }
 
+.sectionHeader {
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  font-size: 1.1em;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text, #eee);
+}
+
+.sectionDesc {
+  font-size: 0.82em;
+  color: var(--color-text-secondary, #888);
+  margin-top: 2px;
+}
+
+.clashSection {
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--color-background-secondary, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--color-separator, rgba(255, 255, 255, 0.08));
+  margin-bottom: 20px;
+}
+
 .body {
-  padding: 15px 0 0;
+  padding: 8px 0 0;
 }
 
 .hostnamePort {
   display: flex;
+  gap: 12px;
 
-  div {
+  div:first-child {
     flex: 1 1 auto;
   }
 
   div:nth-child(2) {
     flex-grow: 0;
-    flex-basis: 120px;
-    margin-left: 10px;
+    flex-basis: 140px;
   }
 }
 
 .error {
-  height: 20px;
+  min-height: 20px;
   font-size: 0.8em;
   color: #ff8b8b;
+  margin-top: 4px;
 }
 
 .footer {
-  padding: 5px 0 10px;
+  padding: 8px 0 4px;
   display: flex;
   justify-content: flex-end;
   align-items: center;
+}
+
+.separator {
+  height: 1px;
+  background: var(--color-separator, rgba(255, 255, 255, 0.08));
+  margin: 20px 0;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 24px;
 }

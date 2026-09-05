@@ -63,4 +63,9 @@ export const data = {
   goroutines: 'Goroutines',
   core_uptime: 'Core Uptime',
   native_memory: 'Native Memory',
+  clash_api: 'Clash API',
+  clash_api_desc: 'Provides proxy groups, rule providers, connections, and logs management.',
+  singbox_service_api_desc: 'Native core telemetry, Memory, Goroutines & Uptime via gRPC-Web.',
+  dismiss_modal: 'Continue to Dashboard',
+  saved: 'Saved!',
 };

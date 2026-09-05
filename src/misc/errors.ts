@@ -19,12 +19,19 @@ export const errors = {
   },
 };
 
-export type Err = { code: number };
+export type Err = { code?: number; message?: string };
 
-export function deriveMessageFromError(err: Err) {
+export function deriveMessageFromError(err: any) {
+  if (!err) return errors.default;
   const { code } = err;
-  if (typeof code === 'number') {
+  if (typeof code === 'number' && errors[code]) {
     return errors[code];
+  }
+  if (err && typeof err.message === 'string' && err.message) {
+    return {
+      message: errors.default.message,
+      detail: err.message,
+    };
   }
   return errors.default;
 }

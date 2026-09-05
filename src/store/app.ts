@@ -1,6 +1,7 @@
 import { atomWithStorage } from 'jotai/utils';
 import { DispatchFn, GetStateFn, State, StateApp } from 'src/store/types';
 
+import { normalizeEndpoint, singBoxClient, SingBoxConfig } from '$src/api/singbox';
 import { ClashAPIConfig } from '$src/types';
 
 import { loadState, saveState } from '../misc/storage';
@@ -18,6 +19,9 @@ export const getClashAPIConfig = (s: State) => {
 };
 export const getSelectedClashAPIConfigIndex = (s: State) => s.app.selectedClashAPIConfigIndex;
 export const getClashAPIConfigs = (s: State) => s.app.clashAPIConfigs;
+export const getSingBoxConfig = (s: State): SingBoxConfig => {
+  return s.app.singBoxConfig || singBoxClient.getCustomConfig();
+};
 export const getTheme = (s: State) => s.app.theme;
 export const getSelectedChartStyleIndex = (s: State) => s.app.selectedChartStyleIndex;
 export const getLatencyTestUrl = (s: State) => s.app.latencyTestUrl;
@@ -104,6 +108,31 @@ export function updateClashAPIConfig(conf: ClashAPIConfig) {
     saveState(getState().app);
     dispatch(closeModal('apiConfig'));
     dispatch(fetchConfigs(clashAPIConfig));
+  };
+}
+
+export function updateSingBoxConfig(conf: SingBoxConfig) {
+  return async (dispatch: DispatchFn, getState: GetStateFn) => {
+    const nextConfig: SingBoxConfig = {
+      endpoint: normalizeEndpoint(conf.endpoint),
+      secret: (conf.secret || '').trim(),
+    };
+    dispatch('appUpdateSingBoxConfig', (s) => {
+      s.app.singBoxConfig = nextConfig;
+    });
+    saveState(getState().app);
+    singBoxClient.setCustomConfig(nextConfig);
+  };
+}
+
+export function clearSingBoxConfig() {
+  return async (dispatch: DispatchFn, getState: GetStateFn) => {
+    const emptyConfig: SingBoxConfig = { endpoint: '', secret: '' };
+    dispatch('appClearSingBoxConfig', (s) => {
+      s.app.singBoxConfig = emptyConfig;
+    });
+    saveState(getState().app);
+    singBoxClient.setCustomConfig(emptyConfig);
   };
 }
 
@@ -213,6 +242,7 @@ const defaultClashAPIConfig = {
 const defaultState: StateApp = {
   selectedClashAPIConfigIndex: 0,
   clashAPIConfigs: [defaultClashAPIConfig],
+  singBoxConfig: { endpoint: '', secret: '' },
 
   latencyTestUrl: 'http://www.gstatic.com/generate_204',
   selectedChartStyleIndex: 0,
@@ -252,6 +282,16 @@ function parseConfigQueryString() {
 export function initialState() {
   let s = loadState();
   s = { ...defaultState, ...s };
+
+  if (s.singBoxConfig && (s.singBoxConfig.endpoint || s.singBoxConfig.secret)) {
+    singBoxClient.setCustomConfig(s.singBoxConfig);
+  } else {
+    const clientConf = singBoxClient.getCustomConfig();
+    if (clientConf.endpoint || clientConf.secret) {
+      s.singBoxConfig = clientConf;
+    }
+  }
+
   const [query, sp, shouldUpdateAddressBar] = parseConfigQueryString();
   if (shouldUpdateAddressBar && history?.replaceState) {
     const target = location.pathname + location.hash + (sp.size > 0 ? `?${sp}` : '');

@@ -65,4 +65,9 @@ export const data = {
   goroutines: 'Goroutines 协程',
   core_uptime: '核心运行时长',
   native_memory: '原生内存 (Memory)',
+  clash_api: 'Clash API',
+  clash_api_desc: '提供代理组、规则集、连接与日志管理。',
+  singbox_service_api_desc: '通过 gRPC-Web 提供原生核心遥测、内存用量、Goroutines 协程与运行时长。',
+  dismiss_modal: '进入仪表盘',
+  saved: '已保存!',
 };

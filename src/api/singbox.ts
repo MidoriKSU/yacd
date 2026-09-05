@@ -387,23 +387,38 @@ export class SingBoxClient {
   public async testConnection(
     rawUrl?: string,
     rawSecret?: string
-  ): Promise<{ ok: boolean; message: string; latency?: number }> {
+  ): Promise<{
+    ok: boolean;
+    message: string;
+    latency?: number;
+    errorType?: 'connected' | 'auth_failed' | 'unreachable' | 'invalid_endpoint' | 'service_unavailable' | 'mixed_content';
+  }> {
     const url = normalizeEndpoint(rawUrl !== undefined ? rawUrl : this.endpoint);
     const secret = (rawSecret !== undefined ? rawSecret : this.secret).trim();
 
     if (!url) {
-      return { ok: false, message: 'Endpoint is empty' };
+      return { ok: false, message: 'Endpoint is empty', errorType: 'invalid_endpoint' };
     }
 
-    if (
-      typeof window !== 'undefined' &&
-      window.location &&
-      window.location.protocol === 'https:' &&
-      url.startsWith('http:')
-    ) {
+    try {
+      new URL(url);
+    } catch {
       return {
         ok: false,
-        message: 'Mixed Content: HTTPS page cannot access HTTP endpoint. Use HTTPS/WSS or access yacd over HTTP.',
+        message: 'Invalid endpoint URL format (must be http://... or https://...)',
+        errorType: 'invalid_endpoint',
+      };
+    }
+
+    const isHttps = typeof window !== 'undefined' && window.location && window.location.protocol === 'https:';
+    const isHttp = /^http:\/\//i.test(url);
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(url);
+
+    if (isHttps && isHttp && !isLocalhost) {
+      return {
+        ok: false,
+        message: 'Mixed Content: Browser blocks HTTPS page from accessing plain HTTP LAN endpoint. Use HTTPS/WSS or access yacd over HTTP.',
+        errorType: 'mixed_content',
       };
     }
 
@@ -435,36 +450,86 @@ export class SingBoxClient {
       if (res.status === 401 || res.status === 403) {
         return {
           ok: false,
-          message: `Unauthorized (${res.status}): secret invalid`,
+          message: `Authentication failed (${res.status}): secret invalid`,
           latency: elapsed,
+          errorType: 'auth_failed',
         };
       }
+
+      if (res.status === 404) {
+        return {
+          ok: false,
+          message: 'Service API unavailable (HTTP 404): sing-box Service API is not enabled or path not mapped on this port',
+          latency: elapsed,
+          errorType: 'service_unavailable',
+        };
+      }
+
       if (!res.ok) {
-        return { ok: false, message: `HTTP ${res.status}: ${res.statusText}`, latency: elapsed };
+        return {
+          ok: false,
+          message: `Service API unavailable (HTTP ${res.status}): ${res.statusText}`,
+          latency: elapsed,
+          errorType: 'service_unavailable',
+        };
+      }
+
+      const grpcStatus = res.headers.get('grpc-status');
+      if (grpcStatus && grpcStatus !== '0') {
+        const grpcMessage = res.headers.get('grpc-message') || `code ${grpcStatus}`;
+        if (grpcStatus === '16' || grpcStatus === '7') {
+          return {
+            ok: false,
+            message: `Authentication failed: ${grpcMessage}`,
+            latency: elapsed,
+            errorType: 'auth_failed',
+          };
+        }
+        return {
+          ok: false,
+          message: `Service API unavailable: ${grpcMessage}`,
+          latency: elapsed,
+          errorType: 'service_unavailable',
+        };
       }
 
       const buf = new Uint8Array(await res.arrayBuffer());
+      let startedAt: number | null = null;
       if (buf.length >= 5) {
         const body = buf.slice(5);
-        const startedAt = decodeStartedAt(body);
-        return {
-          ok: true,
-          message: startedAt
-            ? `OK (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
-            : `OK (${elapsed}ms)`,
-          latency: elapsed,
-        };
+        startedAt = decodeStartedAt(body);
       }
-      return { ok: true, message: `OK (${elapsed}ms)`, latency: elapsed };
+      return {
+        ok: true,
+        message: startedAt
+          ? `Connected (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
+          : `Connected (${elapsed}ms)`,
+        latency: elapsed,
+        errorType: 'connected',
+      };
     } catch (err: any) {
       const elapsed = Math.round(performance.now() - start);
       if (err.name === 'AbortError') {
-        return { ok: false, message: 'Connection timed out (5s)', latency: elapsed };
+        return {
+          ok: false,
+          message: 'Unreachable: Connection timed out (5s)',
+          latency: elapsed,
+          errorType: 'unreachable',
+        };
+      }
+      if (isHttps && isHttp) {
+        return {
+          ok: false,
+          message: 'Mixed Content: Browser blocked insecure HTTP request from HTTPS. Use HTTPS/WSS or run yacd over HTTP.',
+          latency: elapsed,
+          errorType: 'mixed_content',
+        };
       }
       return {
         ok: false,
-        message: err.message || 'Network error or unreachable',
+        message: err.message || 'Unreachable: Network error or CORS blocked',
         latency: elapsed,
+        errorType: 'unreachable',
       };
     }
   }

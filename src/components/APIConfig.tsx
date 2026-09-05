@@ -1,7 +1,11 @@
 import * as React from 'react';
+import { Radio } from 'react-feather';
+import { useTranslation } from 'react-i18next';
 import { fetchConfigs } from 'src/api/configs';
 import { BackendList } from 'src/components/BackendList';
+import { SingBoxConfigSection } from 'src/components/SingBoxConfigSection';
 import { addClashAPIConfig, getClashAPIConfig } from 'src/store/app';
+import { closeModal } from 'src/store/modals';
 import { DispatchFn, State } from 'src/store/types';
 import { ClashAPIConfig } from 'src/types';
 
@@ -19,9 +23,19 @@ const noop = () => {};
 
 const mapState = (s: State) => ({
   apiConfig: getClashAPIConfig(s),
+  isModalOpen: s.modals.apiConfig,
 });
 
-function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
+function APIConfig({
+  dispatch,
+  apiConfig,
+  isModalOpen,
+}: {
+  dispatch: DispatchFn;
+  apiConfig: ClashAPIConfig;
+  isModalOpen: boolean;
+}) {
+  const { t } = useTranslation();
   const [baseURL, setBaseURL] = useState('');
   const [secret, setSecret] = useState('');
   const [metaLabel, setMetaLabel] = useState('');
@@ -34,8 +48,7 @@ function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
     userTouchedFlagRef.current = true;
     setErrMsg('');
     const target = e.target;
-    const { name } = target;
-    const value = target.value;
+    const { name, value } = target;
     switch (name) {
       case 'baseURL':
         setBaseURL(value);
@@ -76,15 +89,23 @@ function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
     [onConfirm],
   );
 
+  const handleDismissModal = useCallback(() => {
+    dispatch(closeModal('apiConfig'));
+  }, [dispatch]);
+
   const detectApiServer = async () => {
     // if there is already a clash API server at `/`, just use it as default value
-    const res = await fetch('/');
-    res.json().then((data) => {
-      if (data['hello'] === 'clash') {
+    try {
+      const res = await fetch('/');
+      const data = await res.json();
+      if (data && data['hello'] === 'clash') {
         setBaseURL(window.location.origin);
       }
-    }, noop);
+    } catch {
+      noop();
+    }
   };
+
   useEffect(() => {
     detectApiServer();
   }, []);
@@ -94,47 +115,77 @@ function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
     <div className={s0.root} ref={contentEl} onKeyDown={handleContentOnKeyDown}>
       <div className={s0.header}>
         <div className={s0.icon}>
-          <SvgYacd width={160} height={160} stroke="var(--stroke)" />
+          <SvgYacd width={120} height={120} stroke="var(--stroke)" />
         </div>
       </div>
-      <div className={s0.body}>
-        <div className={s0.hostnamePort}>
-          <Field
-            id="baseURL"
-            name="baseURL"
-            label="API Base URL"
-            type="text"
-            placeholder="http://127.0.0.1:9090"
-            value={baseURL}
-            onChange={handleInputOnChange}
-          />
-          <Field
-            id="secret"
-            name="secret"
-            label="Secret(optional)"
-            value={secret}
-            type="text"
-            onChange={handleInputOnChange}
+
+      {/* Clash API Configuration Section */}
+      <div className={s0.clashSection}>
+        <div className={s0.sectionHeader}>
+          <div className={s0.sectionTitle}>
+            <Radio size={18} />
+            <span>{t('clash_api') || 'Clash API'}</span>
+          </div>
+          <div className={s0.sectionDesc}>
+            {t('clash_api_desc') ||
+              'Provides proxy groups, rule providers, connections, and logs management.'}
+          </div>
+        </div>
+
+        <div className={s0.body}>
+          <div className={s0.hostnamePort}>
+            <Field
+              id="baseURL"
+              name="baseURL"
+              label="API Base URL"
+              type="text"
+              placeholder="http://127.0.0.1:9090"
+              value={baseURL}
+              onChange={handleInputOnChange}
+            />
+            <Field
+              id="secret"
+              name="secret"
+              label="Secret (optional)"
+              value={secret}
+              type="text"
+              onChange={handleInputOnChange}
+            />
+          </div>
+          {errMsg ? <div className={s0.error}>{errMsg}</div> : null}
+          <div className={s0.label}>
+            <Field
+              id="metaLabel"
+              name="metaLabel"
+              label="Label (optional)"
+              type="text"
+              placeholder=""
+              value={metaLabel}
+              onChange={handleInputOnChange}
+            />
+          </div>
+        </div>
+
+        <div className={s0.footer}>
+          <Button label="Add" onClick={onConfirm} />
+        </div>
+
+        <div style={{ height: 16 }} />
+        <BackendList />
+      </div>
+
+      {/* Sing-box Service API Configuration Section */}
+      <SingBoxConfigSection clashAPIConfig={apiConfig} />
+
+      {/* Modal Dismiss Action */}
+      {isModalOpen && (
+        <div className={s0.modalFooter}>
+          <Button
+            label={t('dismiss_modal') || 'Continue to Dashboard'}
+            onClick={handleDismissModal}
           />
         </div>
-        {errMsg ? <div className={s0.error}>{errMsg}</div> : null}
-        <div className={s0.label}>
-          <Field
-            id="metaLabel"
-            name="metaLabel"
-            label="Label(optional)"
-            type="text"
-            placeholder=""
-            value={metaLabel}
-            onChange={handleInputOnChange}
-          />
-        </div>
-      </div>
-      <div className={s0.footer}>
-        <Button label="Add" onClick={onConfirm} />
-      </div>
-      <div style={{ height: 20 }} />
-      <BackendList />
+      )}
     </div>
   );
 }
@@ -148,7 +199,7 @@ async function verify(apiConfig: ClashAPIConfig): Promise<[number, string?]> {
     if (apiConfig.baseURL) {
       const prefix = apiConfig.baseURL.substring(0, 7);
       if (prefix !== 'http://' && prefix !== 'https:/') {
-        return [1, 'Must starts with http:// or https://'];
+        return [1, 'Must start with http:// or https://'];
       }
     }
 
