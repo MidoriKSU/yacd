@@ -2,6 +2,7 @@
   "name": "yacd",
   "version": "0.3.8",
   "description": "Yet another Clash dashboard",
+  "packageManager": "pnpm@9.15.9",
   "prettier": {
     "printWidth": 100,
     "singleQuote": true
