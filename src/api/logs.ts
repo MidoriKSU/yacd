@@ -93,11 +93,17 @@ let prevConnStr: string;
 let controller: AbortController;
 
 export function fetchLogs(apiConfig: LogsAPIConfig, appendLog: AppendLogFn) {
-  if (apiConfig.logLevel === 'uninit') return;
+  if (apiConfig.logLevel === 'uninit' || !apiConfig?.baseURL) return;
   if (fetched || (ws && ws.readyState === WebSocketReadyState.Open)) return;
-  prevAppendLogFn = appendLog;
   const url = buildLogsWebSocketURL(apiConfig, endpoint);
-  ws = new WebSocket(url);
+  if (!url) return;
+  prevAppendLogFn = appendLog;
+  try {
+    ws = new WebSocket(url);
+  } catch {
+    fetchLogsWithFetch(apiConfig, appendLog);
+    return;
+  }
   ws.addEventListener('error', () => {
     fetchLogsWithFetch(apiConfig, appendLog);
   });

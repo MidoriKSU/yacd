@@ -90,12 +90,26 @@ export default connect(mapState)(SideBar);
 export function SideBar(props: Props) {
   const { t } = useTranslation();
   const location = useLocation();
-  const { data: version } = useQuery(['/version', props.apiConfig], () =>
-    fetchVersion('/version', props.apiConfig)
+  const { data: version } = useQuery(
+    ['/version', props.apiConfig],
+    () => fetchVersion('/version', props.apiConfig),
+    {
+      suspense: false,
+      retry: false,
+      enabled: Boolean(props.apiConfig?.baseURL),
+    }
   );
   return (
     <div className={s.root}>
-      <div className={version.meta && version.premium ? s.logo_singbox : version.meta ? s.logo_meta : s.logo_clash} />
+      <div
+        className={
+          version?.meta && version?.premium
+            ? s.logo_singbox
+            : version?.meta
+            ? s.logo_meta
+            : s.logo_clash
+        }
+      />
       <div className={s.rows}>
         {pages.map(({ to, iconId, labelText }) => (
           <SideBarRow

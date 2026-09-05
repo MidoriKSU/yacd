@@ -1,3 +1,4 @@
+import { singBoxClient } from 'src/api/singbox';
 import { ClashGeneralConfig, DispatchFn, GetStateFn, State, StateConfigs } from 'src/store/types';
 import { ClashAPIConfig } from 'src/types';
 
@@ -10,14 +11,21 @@ export const getLogLevel = (s: State) => s.configs.configs['log-level'];
 
 export function fetchConfigs(apiConfig: ClashAPIConfig) {
   return async (dispatch: DispatchFn, getState: GetStateFn) => {
+    if (!apiConfig || !apiConfig.baseURL) {
+      const isSingBoxConnected = singBoxClient.getSnapshot().phase === 'connected';
+      if (!isSingBoxConnected) {
+        dispatch(openModal('apiConfig'));
+      }
+      return;
+    }
+
     let res: Response;
     try {
       res = await configsAPI.fetchConfigs(apiConfig);
     } catch (err) {
       // TypeError and AbortError
-      const state = getState();
-      const hasSingBox = Boolean(state.app.singBoxConfig?.endpoint);
-      if (!hasSingBox) {
+      const isSingBoxConnected = singBoxClient.getSnapshot().phase === 'connected';
+      if (!isSingBoxConnected) {
         dispatch(openModal('apiConfig'));
       }
       return;
@@ -25,9 +33,8 @@ export function fetchConfigs(apiConfig: ClashAPIConfig) {
 
     if (!res.ok) {
       console.log('Error fetch configs', res.statusText);
-      const state = getState();
-      const hasSingBox = Boolean(state.app.singBoxConfig?.endpoint);
-      if (!hasSingBox) {
+      const isSingBoxConnected = singBoxClient.getSnapshot().phase === 'connected';
+      if (!isSingBoxConnected) {
         dispatch(openModal('apiConfig'));
       }
       return;

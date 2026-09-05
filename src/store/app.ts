@@ -298,23 +298,27 @@ export function initialState() {
     history.replaceState(null, '', target);
   }
   const conf = s.clashAPIConfigs[s.selectedClashAPIConfigIndex];
-  if (conf) {
-    const url = new URL(conf.baseURL);
-    if (query.hostname) {
-      if (query.hostname.indexOf('http') === 0) {
-        url.href = decodeURIComponent(query.hostname);
-      } else {
-        url.hostname = query.hostname;
+  if (conf && conf.baseURL) {
+    try {
+      const url = new URL(conf.baseURL);
+      if (query.hostname) {
+        if (query.hostname.indexOf('http') === 0) {
+          url.href = decodeURIComponent(query.hostname);
+        } else {
+          url.hostname = query.hostname;
+        }
       }
-    }
-    if (query.port) {
-      url.port = query.port;
-    }
-    // url.href is a stringifier and it appends a trailing slash
-    // that is not we want
-    conf.baseURL = trimTrailingSlash(url.href);
-    if (query.secret) {
-      conf.secret = query.secret;
+      if (query.port) {
+        url.port = query.port;
+      }
+      // url.href is a stringifier and it appends a trailing slash
+      // that is not we want
+      conf.baseURL = trimTrailingSlash(url.href);
+      if (query.secret) {
+        conf.secret = query.secret;
+      }
+    } catch {
+      // ignore invalid baseURL
     }
   }
 

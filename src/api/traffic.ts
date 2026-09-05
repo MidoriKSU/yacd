@@ -81,10 +81,17 @@ function pump(reader: ReadableStreamDefaultReader) {
 // https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/readyState
 let wsState: number;
 function fetchData(apiConfig: ClashAPIConfig) {
-  if (fetched || wsState === 1) return traffic;
-  wsState = 1;
+  if (fetched || wsState === 1 || !apiConfig?.baseURL) return traffic;
   const url = buildWebSocketURL(apiConfig, endpoint);
-  const ws = new WebSocket(url);
+  if (!url) return traffic;
+  wsState = 1;
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(url);
+  } catch {
+    wsState = 3;
+    return traffic;
+  }
 
   let frozenState = false;
   const onFrozen = () => {

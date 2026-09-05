@@ -224,8 +224,14 @@ function ConfigImpl({
 
   const { t, i18n } = useTranslation();
 
-  const { data: version } = useQuery(['/version', apiConfig], () =>
-    fetchVersion('/version', apiConfig)
+  const { data: version } = useQuery(
+    ['/version', apiConfig],
+    () => fetchVersion('/version', apiConfig),
+    {
+      suspense: false,
+      retry: false,
+      enabled: Boolean(apiConfig?.baseURL),
+    }
   );
 
   const modeOptions = useMemo(() => {
@@ -236,7 +242,7 @@ function ConfigImpl({
     <div>
       <ContentHeader title={t('Config')} />
       <div className={s0.root}>
-        {(version.meta && version.premium) ||
+        {(version?.meta && version?.premium) ||
           portFields.map((f) =>
             configState[f.key] !== undefined ? (
               <div key={f.key}>

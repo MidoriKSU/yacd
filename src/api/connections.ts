@@ -53,12 +53,20 @@ type UnsubscribeFn = () => void;
 
 let wsState: number;
 export function fetchData(apiConfig: ClashAPIConfig, listener: unknown): UnsubscribeFn | void {
+  if (!apiConfig?.baseURL) return;
   if (fetched || wsState === 1) {
     if (listener) return subscribe(listener);
   }
-  wsState = 1;
   const url = buildWebSocketURL(apiConfig, endpoint);
-  const ws = new WebSocket(url);
+  if (!url) return;
+  wsState = 1;
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(url);
+  } catch {
+    wsState = 3;
+    return;
+  }
 
   let frozenState = false;
   const onFrozen = () => {

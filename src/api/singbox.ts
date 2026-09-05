@@ -657,6 +657,9 @@ export class SingBoxClient {
 
     const controller = new AbortController();
     this.abortController = controller;
+    const connectTimer = setTimeout(() => {
+      controller.abort();
+    }, 5000);
     const httpUrl = baseUrl + '/daemon.StartedService/SubscribeStatus';
 
     try {
@@ -676,6 +679,7 @@ export class SingBoxClient {
         body: reqPayload,
         signal: controller.signal,
       });
+      clearTimeout(connectTimer);
 
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
@@ -730,7 +734,8 @@ export class SingBoxClient {
       this.notify();
       this.scheduleReconnect();
     } catch (err: any) {
-      if (controller.signal.aborted) return;
+      clearTimeout(connectTimer);
+      if (controller.signal.aborted && this.abortController !== controller) return;
       this.phase = 'error';
       const isHttps =
         typeof window !== 'undefined' &&
@@ -739,8 +744,10 @@ export class SingBoxClient {
       const isHttp = /^http:\/\//i.test(baseUrl);
       if (isHttps && isHttp) {
         this.error = 'Mixed Content';
+      } else if (err?.name === 'AbortError') {
+        this.error = 'Connection timed out';
       } else {
-        this.error = err.message || 'Connection failed';
+        this.error = err?.message || 'Connection failed';
       }
       this.notify();
       this.scheduleReconnect();
@@ -748,6 +755,8 @@ export class SingBoxClient {
   }
 
   private async fetchStartedAt(baseUrl: string) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
     try {
       const httpUrl = baseUrl + '/daemon.StartedService/GetStartedAt';
       const headers: Record<string, string> = {
@@ -764,6 +773,7 @@ export class SingBoxClient {
         method: 'POST',
         headers,
         body: emptyFrame,
+        signal: controller.signal,
       });
       if (res.ok) {
         const buf = new Uint8Array(await res.arrayBuffer());
@@ -778,6 +788,8 @@ export class SingBoxClient {
       }
     } catch {
       // ignore
+    } finally {
+      clearTimeout(timer);
     }
   }
 

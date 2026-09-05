@@ -12,9 +12,17 @@ export async function fetchVersion(
   apiConfig: ClashAPIConfig,
 ): Promise<VersionData> {
   let json = {};
+  if (!apiConfig || !apiConfig.baseURL) {
+    return json;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
   try {
     const { url, init } = getURLAndInit(apiConfig);
-    const res = await fetch(url + endpoint, init);
+    const res = await fetch(url + endpoint, {
+      ...init,
+      signal: controller.signal,
+    });
     if (res.ok) {
       json = await res.json();
     }
@@ -22,6 +30,8 @@ export async function fetchVersion(
     // log and ignore
     // eslint-disable-next-line no-console
     console.log(`failed to fetch ${endpoint}`, err);
+  } finally {
+    clearTimeout(timer);
   }
   return json;
 }

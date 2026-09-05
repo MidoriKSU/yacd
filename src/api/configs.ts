@@ -8,7 +8,16 @@ const updateGeoDatabasesFileEndpoint = '/configs/geo';
 
 export async function fetchConfigs(apiConfig: ClashAPIConfig) {
   const { url, init } = getURLAndInit(apiConfig);
-  return await fetch(url + endpoint, init);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    return await fetch(url + endpoint, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // TODO support PUT /configs
