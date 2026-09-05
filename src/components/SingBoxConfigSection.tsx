@@ -125,19 +125,10 @@ function SingBoxConfigSectionImpl({
     window.location &&
     window.location.protocol === 'https:';
   const isHttpTarget = /^http:\/\//i.test(endpoint.trim());
-  const isBlocked = isHttps && isHttpTarget && endpoint.trim().length > 0;
+  const showMixedContentWarning =
+    isHttps && isHttpTarget && endpoint.trim().length > 0;
 
   const handleTest = async () => {
-    if (isBlocked) {
-      setTestResult({
-        ok: false,
-        message:
-          t('mixed_content_title') ||
-          'HTTPS dashboard cannot access an HTTP Service API. Use HTTPS, or open yacd from the sing-box-hosted external UI.',
-        errorType: 'blocked',
-      });
-      return;
-    }
     setTesting(true);
     setTestResult(null);
     try {
@@ -155,9 +146,6 @@ function SingBoxConfigSectionImpl({
   };
 
   const phaseLabel = (() => {
-    if (isBlocked) {
-      return t('blocked') || 'Blocked';
-    }
     switch (snapshot.phase) {
       case 'unconfigured':
         return t('unconfigured') || 'Not configured';
@@ -174,7 +162,11 @@ function SingBoxConfigSectionImpl({
         ) {
           return t('auth_failed') || 'Authentication failed';
         }
-        if (snapshot.error === 'Blocked') {
+        if (
+          snapshot.error &&
+          (snapshot.error.toLowerCase().includes('mixed content') ||
+            snapshot.error === 'Blocked')
+        ) {
           return t('blocked') || 'Blocked';
         }
         return snapshot.error || t('unavailable') || 'Unreachable / unavailable';
@@ -193,7 +185,7 @@ function SingBoxConfigSectionImpl({
             <span>{t('singbox_service_api') || 'sing-box Service API'}</span>
           </div>
           <div className={s0.badge}>
-            <span className={cx(s0.dot, isBlocked ? s0.blocked : s0[snapshot.phase])} />
+            <span className={cx(s0.dot, s0[snapshot.phase])} />
             <span>{phaseLabel}</span>
             {snapshot.isConfigured && snapshot.endpoint ? (
               <span className={s0.badgeEndpoint}>({snapshot.endpoint})</span>
@@ -227,7 +219,7 @@ function SingBoxConfigSectionImpl({
               setTestResult(null);
             }}
           />
-          {isBlocked && (
+          {showMixedContentWarning && (
             <div className={s0.mixedContentAlert}>
               <AlertTriangle size={15} />
               <div>
