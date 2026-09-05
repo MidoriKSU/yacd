@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Setup Nodejs
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm tsc --noEmit
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - name: Package dashboard
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE_NAME="yacd-${TAG}.zip"
+          echo "Packaging ${ARCHIVE_NAME} from public directory contents..."
+          (cd public && zip -q -r "../${ARCHIVE_NAME}" .)
+          ls -lh "${ARCHIVE_NAME}"
+
+      - name: Verify ZIP layout
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE_NAME="yacd-${TAG}.zip"
+          echo "Verifying ${ARCHIVE_NAME}..."
+          # 1. Check index.html exists directly at archive root
+          unzip -l "${ARCHIVE_NAME}" | awk '{print $4}' | grep '^index\.html$' || {
+            echo "ERROR: index.html is not at archive root!"
+            exit 1
+          }
+          # 2. Check assets directory exists
+          unzip -l "${ARCHIVE_NAME}" | awk '{print $4}' | grep '^assets/' || {
+            echo "ERROR: assets/ directory not found in archive!"
+            exit 1
+          }
+          # 3. Check for forbidden directories (.git, node_modules, public/)
+          if unzip -l "${ARCHIVE_NAME}" | awk '{print $4}' | grep -E '^(\.git/|node_modules/|public/)'; then
+            echo "ERROR: Archive contains forbidden top-level folder!"
+            exit 1
+          fi
+          # 4. Test extracting to a temporary directory
+          TMP_DIR=$(mktemp -d)
+          unzip -q "${ARCHIVE_NAME}" -d "${TMP_DIR}"
+          [ -f "${TMP_DIR}/index.html" ] || { echo "ERROR: Extracted index.html missing"; exit 1; }
+          rm -rf "${TMP_DIR}"
+          echo "Archive layout verified successfully."
+
+      - name: Publish GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE_NAME="yacd-${TAG}.zip"
+          if [ -f "RELEASE_NOTES.md" ]; then
+            gh release create "${TAG}" "${ARCHIVE_NAME}" \
+              --title "yacd ${TAG}" \
+              --notes-file RELEASE_NOTES.md
+          else
+            gh release create "${TAG}" "${ARCHIVE_NAME}" \
+              --title "yacd ${TAG}" \
+              --notes "yacd ${TAG}"
+          fi
