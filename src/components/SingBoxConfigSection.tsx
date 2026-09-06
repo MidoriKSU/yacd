@@ -15,6 +15,7 @@ import {
   formatUptime,
   singBoxClient,
   SingBoxConfig,
+  SingBoxResultState,
   SingBoxSnapshot,
 } from 'src/api/singbox';
 import Button from 'src/components/Button';
@@ -68,6 +69,7 @@ function SingBoxConfigSectionImpl({
     ok: boolean;
     message: string;
     latency?: number;
+    resultState?: SingBoxResultState;
     errorType?: string;
   } | null>(null);
   const [isSaved, setIsSaved] = useState(false);
@@ -167,9 +169,6 @@ function SingBoxConfigSectionImpl({
           <div className={s0.badge}>
             <span className={cx(s0.dot, s0[snapshot.phase])} />
             <span>{phaseLabel}</span>
-            {snapshot.isConfigured && snapshot.endpoint ? (
-              <span className={s0.badgeEndpoint}>({snapshot.endpoint})</span>
-            ) : null}
             {snapshot.startedAt ? (
               <span className={s0.badgeUptime}>
                 · {formatUptime(snapshot.startedAt)}
@@ -224,9 +223,6 @@ function SingBoxConfigSectionImpl({
               {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          {secret ? (
-            <div className={s0.subInfo}>Authentication secret set</div>
-          ) : null}
         </div>
       </div>
 

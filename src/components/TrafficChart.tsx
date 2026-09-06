@@ -9,7 +9,7 @@ import { chartJSResource, chartStyles, commonDataSetProps } from '../misc/chart'
 import { getSelectedChartStyleIndex } from '../store/app';
 import { connect } from './StateProvider';
 
-const { useMemo } = React;
+const { useMemo, useState, useEffect } = React;
 
 const chartWrapperStyle: React.CSSProperties = {
   position: 'relative',
@@ -31,6 +31,13 @@ function TrafficChart({
   const { t } = useTranslation();
 
   const traffic = singBoxClient.trafficChartSource;
+  const [hasData, setHasData] = useState(() => traffic.up.length > 0);
+  useEffect(() => {
+    return traffic.subscribe(() => {
+      setHasData(traffic.up.length > 0);
+    });
+  }, [traffic]);
+
   const styleIdx = (selectedChartStyleIndex || 0) % chartStyles.length;
   const data = useMemo(
     () => ({
@@ -58,6 +65,22 @@ function TrafficChart({
   return (
     <div style={chartWrapperStyle}>
       <canvas id="trafficChart" />
+      {!hasData && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            opacity: 0.6,
+            fontSize: '0.88em',
+            pointerEvents: 'none',
+            textAlign: 'center',
+          }}
+        >
+          {t('waiting_for_telemetry') || 'Waiting for telemetry...'}
+        </div>
+      )}
     </div>
   );
 }

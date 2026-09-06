@@ -384,7 +384,7 @@ function ConfigImpl({
         <div />
       </div>
 
-      <div className={s0.section}>
+      <div className={s0.singboxSection}>
         <SingBoxConfigSection clashAPIConfig={apiConfig} />
       </div>
     </div>

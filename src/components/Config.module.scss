@@ -40,6 +40,17 @@
   padding: 11px 0;
 }
 
+.singboxSection {
+  max-width: 900px;
+  padding: 6px 8px 10px;
+  box-sizing: border-box;
+  width: 100%;
+
+  @media screen and (min-width: 30em) {
+    padding: 10px 40px 15px;
+  }
+}
+
 .singboxCard {
   grid-column: 1 / -1;
   border: 1px solid var(--color-separator, #373737);

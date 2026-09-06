@@ -27,7 +27,7 @@ export default function TrafficNow() {
   const phaseLabel = {
     unconfigured: t('unconfigured') || 'Not Configured',
     connected: t('connected') || 'Connected',
-    connecting: t('connecting') || 'Connecting...',
+    connecting: t('connecting') || 'Connecting / Waiting for telemetry...',
     error: snapshot.resultState || snapshot.error || 'Connection Failed',
     disconnected: t('disconnected') || 'Disconnected',
   }[snapshot.phase];
@@ -45,11 +45,17 @@ export default function TrafficNow() {
       const staleNotice = isStale ? ` ⚠️ ${t('stale') || 'Stale'}` : '';
       switch (type) {
         case 'up':
+          if (!status.trafficAvailable) {
+            return { value: '--', sub: 'Traffic counter unavailable' };
+          }
           return {
             value: prettyBytes(status.uplink) + '/s',
             sub: `${t('Upload Total') || 'Total'}: ${prettyBytes(status.uplinkTotal)}${staleNotice}`,
           };
         case 'down':
+          if (!status.trafficAvailable) {
+            return { value: '--', sub: 'Traffic counter unavailable' };
+          }
           return {
             value: prettyBytes(status.downlink) + '/s',
             sub: `${t('Download Total') || 'Total'}: ${prettyBytes(status.downlinkTotal)}${staleNotice}`,
@@ -69,7 +75,7 @@ export default function TrafficNow() {
       }
     }
     if (isConnecting) {
-      return { value: '...', sub: t('connecting') || 'Connecting...' };
+      return { value: '...', sub: t('waiting_for_telemetry') || 'Waiting for telemetry...' };
     }
     return { value: '--', sub: snapshot.error || t('unavailable') || 'Unavailable' };
   };

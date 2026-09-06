@@ -349,6 +349,30 @@ export function decodeStartedAt(bytes: Uint8Array): number | null {
   return startedAt;
 }
 
+// Parse gRPC-Web trailer headers (from text/plain trailer frames)
+export function parseGrpcTrailers(text: string): { grpcStatus?: string; grpcMessage?: string } {
+  const lines = text.split(/\r?\n/);
+  let grpcStatus: string | undefined;
+  let grpcMessage: string | undefined;
+  for (const line of lines) {
+    const colon = line.indexOf(':');
+    if (colon > 0) {
+      const key = line.slice(0, colon).trim().toLowerCase();
+      const val = line.slice(colon + 1).trim();
+      if (key === 'grpc-status') {
+        grpcStatus = val;
+      } else if (key === 'grpc-message') {
+        try {
+          grpcMessage = decodeURIComponent(val);
+        } catch {
+          grpcMessage = val;
+        }
+      }
+    }
+  }
+  return { grpcStatus, grpcMessage };
+}
+
 // Build 5-byte framed SubscribeStatusRequest protobuf message (interval = 1s = 1e9 ns)
 function buildSubscribeStatusPayload(): Uint8Array {
   // tag: field 1, wire type 0 = (1 << 3) | 0 = 0x08
@@ -399,10 +423,10 @@ export class SingBoxClient {
   private history: SingBoxMemoryPoint[] = [];
 
   private chartListeners = new Set<() => void>();
-  private chartLabels: string[] = Array(MAX_HISTORY_POINTS).fill('');
-  private chartUp: number[] = Array(MAX_HISTORY_POINTS).fill(0);
-  private chartDown: number[] = Array(MAX_HISTORY_POINTS).fill(0);
-  private chartInuse: number[] = Array(MAX_HISTORY_POINTS).fill(0);
+  private chartLabels: string[] = [];
+  private chartUp: number[] = [];
+  private chartDown: number[] = [];
+  private chartInuse: number[] = [];
 
   public readonly trafficChartSource: TrafficChartSource = {
     labels: this.chartLabels,
@@ -606,10 +630,10 @@ export class SingBoxClient {
         };
       }
 
-      const grpcStatus = res.headers.get('grpc-status');
-      if (grpcStatus && grpcStatus !== '0') {
-        const grpcMessage = res.headers.get('grpc-message') || `code ${grpcStatus}`;
-        if (grpcStatus === '16' || grpcStatus === '7') {
+      const headerGrpcStatus = res.headers.get('grpc-status');
+      if (headerGrpcStatus && headerGrpcStatus !== '0') {
+        const grpcMessage = res.headers.get('grpc-message') || `code ${headerGrpcStatus}`;
+        if (headerGrpcStatus === '16' || headerGrpcStatus === '7') {
           return {
             ok: false,
             resultState: 'Authentication Failed',
@@ -626,11 +650,58 @@ export class SingBoxClient {
       }
 
       const buf = new Uint8Array(await res.arrayBuffer());
+      let offset = 0;
       let startedAt: number | null = null;
-      if (buf.length >= 5) {
-        const body = buf.slice(5);
-        startedAt = decodeStartedAt(body);
+      let hasData = false;
+
+      while (offset + 5 <= buf.length) {
+        const flag = buf[offset];
+        const len =
+          ((buf[offset + 1] << 24) |
+            (buf[offset + 2] << 16) |
+            (buf[offset + 3] << 8) |
+            buf[offset + 4]) >>> 0;
+        if (offset + 5 + len > buf.length) break;
+
+        const body = buf.slice(offset + 5, offset + 5 + len);
+        offset += 5 + len;
+
+        if ((flag & 0x80) !== 0) {
+          // Trailer frame
+          const trailerText = new TextDecoder().decode(body);
+          const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
+          if (grpcStatus && grpcStatus !== '0') {
+            if (grpcStatus === '16' || grpcStatus === '7') {
+              return {
+                ok: false,
+                resultState: 'Authentication Failed',
+                message: `Authentication Failed: ${grpcMessage || 'secret invalid'}`,
+                latency: elapsed,
+              };
+            }
+            return {
+              ok: false,
+              resultState: 'Transport Error',
+              message: `Transport Error (gRPC ${grpcStatus}): ${grpcMessage || 'RPC failed'}`,
+              latency: elapsed,
+            };
+          }
+        } else {
+          // Data frame
+          hasData = true;
+          startedAt = decodeStartedAt(body);
+        }
       }
+
+      if (!hasData) {
+        return {
+          ok: false,
+          resultState: 'Transport Error',
+          message: 'Transport Error: Empty response from Service API',
+          latency: elapsed,
+        };
+      }
+
       return {
         ok: true,
         resultState: 'Connected',
@@ -659,6 +730,11 @@ export class SingBoxClient {
       this.error = undefined;
       this.currentStatus = null;
       this.startedAt = null;
+      this.history = [];
+      this.chartLabels.length = 0;
+      this.chartUp.length = 0;
+      this.chartDown.length = 0;
+      this.chartInuse.length = 0;
       this.notify();
       return;
     }
@@ -699,100 +775,18 @@ export class SingBoxClient {
     this.error = undefined;
     this.notify();
 
-    // Try WebSocket connection with grpc-websockets subprotocol
-    this.connectWebSocket(targetUrl);
+    // Stream status over gRPC-Web HTTP streaming
+    this.connectHttpStream(targetUrl);
     // Fetch StartedAt timestamp concurrently
     this.fetchStartedAt(targetUrl);
   }
 
-  private connectWebSocket(baseUrl: string) {
-    try {
-      const wsUrl =
-        baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:') +
-        '/daemon.StartedService/SubscribeStatus';
-      const ws = new WebSocket(wsUrl, ['grpc-websockets']);
-      this.ws = ws;
-      ws.binaryType = 'arraybuffer';
-
-      let buffer = new Uint8Array(0);
-
-      ws.onopen = () => {
-        let headers =
-          'content-type: application/grpc-web+proto\r\nx-grpc-web: 1\r\naccept-language: en\r\n';
-        const secret = this.effectiveSecret();
-        if (secret) {
-          headers += `authorization: Bearer ${secret}\r\n`;
-        }
-        headers += '\r\n';
-        ws.send(new TextEncoder().encode(headers));
-
-        const reqPayload = buildSubscribeStatusPayload();
-        ws.send(reqPayload);
-
-        this.phase = 'connected';
-        this.resultState = 'Connected';
-        this.error = undefined;
-        this.notify();
-      };
-
-      ws.onmessage = (evt) => {
-        const chunk = new Uint8Array(evt.data as ArrayBuffer);
-        const merged = new Uint8Array(buffer.length + chunk.length);
-        merged.set(buffer);
-        merged.set(chunk, buffer.length);
-        buffer = merged;
-
-        while (buffer.length >= 5) {
-          const flag = buffer[0];
-          const len =
-            ((buffer[1] << 24) | (buffer[2] << 16) | (buffer[3] << 8) | buffer[4]) >>> 0;
-          if (buffer.length < 5 + len) break;
-
-          const body = buffer.slice(5, 5 + len);
-          buffer = buffer.slice(5 + len);
-
-          if ((flag & 0x80) === 0) {
-            // Data frame
-            try {
-              const status = decodeStatus(body);
-              this.onNewStatus(status);
-            } catch (err) {
-              // eslint-disable-next-line no-console
-              console.warn('singbox status decode error', err);
-            }
-          }
-        }
-      };
-
-      ws.onerror = () => {
-        if (this.phase === 'connecting') {
-          // Fall back to HTTP stream if WebSocket fails
-          this.ws = null;
-          this.connectHttpStream(baseUrl);
-        }
-      };
-
-      ws.onclose = () => {
-        if (this.ws === ws) {
-          this.ws = null;
-          this.phase = 'disconnected';
-          this.notify();
-          this.scheduleReconnect();
-        }
-      };
-    } catch {
-      this.connectHttpStream(baseUrl);
-    }
-  }
-
   private async connectHttpStream(baseUrl: string) {
-    if (this.ws) return;
-
     const controller = new AbortController();
     this.abortController = controller;
     const connectTimer = setTimeout(() => {
       controller.abort();
-    }, 5000);
+    }, 10000);
     const httpUrl = baseUrl + '/daemon.StartedService/SubscribeStatus';
 
     try {
@@ -825,14 +819,23 @@ export class SingBoxClient {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
 
+      const headerGrpcStatus = res.headers.get('grpc-status');
+      if (headerGrpcStatus && headerGrpcStatus !== '0') {
+        const msg = res.headers.get('grpc-message') || `code ${headerGrpcStatus}`;
+        if (headerGrpcStatus === '16' || headerGrpcStatus === '7') {
+          this.phase = 'error';
+          this.resultState = 'Authentication Failed';
+          this.error = `Authentication Failed: ${msg}`;
+          this.notify();
+          this.scheduleReconnect();
+          return;
+        }
+        throw new Error(`gRPC Error (${headerGrpcStatus}): ${msg}`);
+      }
+
       if (!res.body) {
         throw new Error('Response body is empty');
       }
-
-      this.phase = 'connected';
-      this.resultState = 'Connected';
-      this.error = undefined;
-      this.notify();
 
       const reader = res.body.getReader();
       let buffer = new Uint8Array(0);
@@ -855,9 +858,31 @@ export class SingBoxClient {
             const body = buffer.slice(5, 5 + len);
             buffer = buffer.slice(5 + len);
 
-            if ((flag & 0x80) === 0) {
+            if ((flag & 0x80) !== 0) {
+              // Trailer frame
+              const trailerText = new TextDecoder().decode(body);
+              const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
+              if (grpcStatus && grpcStatus !== '0') {
+                if (grpcStatus === '16' || grpcStatus === '7') {
+                  this.phase = 'error';
+                  this.resultState = 'Authentication Failed';
+                  this.error = `Authentication Failed: ${grpcMessage || 'secret invalid'}`;
+                } else {
+                  this.phase = 'error';
+                  this.resultState = 'Transport Error';
+                  this.error = `gRPC Error (${grpcStatus}): ${grpcMessage || 'stream failed'}`;
+                }
+                this.notify();
+                this.scheduleReconnect();
+                return;
+              }
+            } else {
+              // Valid telemetry data frame!
               try {
                 const status = decodeStatus(body);
+                this.phase = 'connected';
+                this.resultState = 'Connected';
+                this.error = undefined;
                 this.onNewStatus(status);
               } catch (err) {
                 // eslint-disable-next-line no-console
@@ -868,7 +893,13 @@ export class SingBoxClient {
         }
       }
 
-      this.phase = 'disconnected';
+      if (this.phase === 'connected') {
+        this.phase = 'disconnected';
+      } else {
+        this.phase = 'error';
+        this.resultState = this.resultState || 'Transport Error';
+        this.error = this.error || 'Connection closed without telemetry';
+      }
       this.notify();
       this.scheduleReconnect();
     } catch (err: any) {
@@ -910,12 +941,23 @@ export class SingBoxClient {
       const res = await fetch(httpUrl, fetchInit);
       if (res.ok) {
         const buf = new Uint8Array(await res.arrayBuffer());
-        if (buf.length >= 5) {
-          const body = buf.slice(5);
-          const val = decodeStartedAt(body);
-          if (val) {
-            this.startedAt = val;
-            this.notify();
+        let offset = 0;
+        while (offset + 5 <= buf.length) {
+          const flag = buf[offset];
+          const len =
+            ((buf[offset + 1] << 24) |
+              (buf[offset + 2] << 16) |
+              (buf[offset + 3] << 8) |
+              buf[offset + 4]) >>> 0;
+          if (offset + 5 + len > buf.length) break;
+          const body = buf.slice(offset + 5, offset + 5 + len);
+          offset += 5 + len;
+          if ((flag & 0x80) === 0) {
+            const val = decodeStartedAt(body);
+            if (val) {
+              this.startedAt = val;
+              this.notify();
+            }
           }
         }
       }
@@ -939,17 +981,25 @@ export class SingBoxClient {
     }
 
     const timeLabel = new Date(now).toLocaleTimeString();
-    this.chartLabels.shift();
     this.chartLabels.push(timeLabel);
+    if (this.chartLabels.length > MAX_HISTORY_POINTS) {
+      this.chartLabels.shift();
+    }
 
-    this.chartUp.shift();
-    this.chartUp.push(status.uplink);
+    this.chartUp.push(status.trafficAvailable ? status.uplink : 0);
+    if (this.chartUp.length > MAX_HISTORY_POINTS) {
+      this.chartUp.shift();
+    }
 
-    this.chartDown.shift();
-    this.chartDown.push(status.downlink);
+    this.chartDown.push(status.trafficAvailable ? status.downlink : 0);
+    if (this.chartDown.length > MAX_HISTORY_POINTS) {
+      this.chartDown.shift();
+    }
 
-    this.chartInuse.shift();
     this.chartInuse.push(status.memory);
+    if (this.chartInuse.length > MAX_HISTORY_POINTS) {
+      this.chartInuse.shift();
+    }
 
     for (const fn of this.chartListeners) {
       try {
