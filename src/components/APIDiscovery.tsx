@@ -1,9 +1,13 @@
 import * as React from 'react';
 import { ThemeSwitcher } from 'src/components/shared/ThemeSwitcher';
 import { DOES_NOT_SUPPORT_FETCH, errors, YacdError } from 'src/misc/errors';
-import { getClashAPIConfig } from 'src/store/app';
+import {
+  getClashAPIConfig,
+  hasAnyConfiguredBackend,
+  hasSelectedClashBackend,
+} from 'src/store/app';
 import { fetchConfigs } from 'src/store/configs';
-import { closeModal } from 'src/store/modals';
+import { closeModal, openModal } from 'src/store/modals';
 import { DispatchFn, State, StateModals } from 'src/store/types';
 
 import { ClashAPIConfig } from '$src/types';
@@ -19,10 +23,14 @@ function APIDiscovery({
   dispatch,
   apiConfig,
   modals,
+  hasAny,
+  hasClash,
 }: {
   dispatch: DispatchFn;
-  apiConfig: ClashAPIConfig;
+  apiConfig?: ClashAPIConfig;
   modals: StateModals;
+  hasAny: boolean;
+  hasClash: boolean;
 }) {
   if (!window.fetch) {
     const { detail } = errors[DOES_NOT_SUPPORT_FETCH];
@@ -31,15 +39,28 @@ function APIDiscovery({
   }
 
   const closeApiConfigModal = useCallback(() => {
-    dispatch(closeModal('apiConfig'));
-  }, [dispatch]);
+    if (hasAny) {
+      dispatch(closeModal('apiConfig'));
+    }
+  }, [dispatch, hasAny]);
+
   useEffect(() => {
-    dispatch(fetchConfigs(apiConfig));
-  }, [dispatch, apiConfig]);
+    if (!hasAny) {
+      dispatch(openModal('apiConfig'));
+    }
+  }, [dispatch, hasAny]);
+
+  useEffect(() => {
+    if (hasClash && apiConfig && apiConfig.baseURL) {
+      dispatch(fetchConfigs(apiConfig));
+    }
+  }, [dispatch, hasClash, apiConfig]);
+
+  const isOpen = !hasAny || modals.apiConfig;
 
   return (
     <Modal
-      isOpen={modals.apiConfig}
+      isOpen={isOpen}
       className={s0.content}
       overlayClassName={s0.overlay}
       shouldCloseOnOverlayClick={false}
@@ -60,6 +81,8 @@ function APIDiscovery({
 const mapState = (s: State) => ({
   modals: s.modals,
   apiConfig: getClashAPIConfig(s),
+  hasAny: hasAnyConfiguredBackend(s),
+  hasClash: hasSelectedClashBackend(s),
 });
 
 export default connect(mapState)(APIDiscovery);

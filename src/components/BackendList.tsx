@@ -53,7 +53,7 @@ function BackendListImpl({
               key={item.baseURL + item.secret + item.metaLabel}
             >
               <Item
-                disableRemove={idx === selectedClashAPIConfigIndex}
+                disableRemove={apiConfigs.length > 1 && idx === selectedClashAPIConfigIndex}
                 conf={item}
                 onRemove={onRemove}
                 onSelect={onSelect}

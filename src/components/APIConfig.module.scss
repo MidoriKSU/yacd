@@ -20,6 +20,35 @@
   }
 }
 
+.tabGroup {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 16px 0 6px;
+}
+
+.tabBtn {
+  background: var(--bg-near-transparent, rgba(128, 128, 128, 0.1));
+  color: var(--color-text-secondary, #999);
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: var(--color-text-main, #fff);
+  }
+
+  &.tabActive {
+    background: var(--color-focus-blue, #20497e);
+    color: #fff;
+    border-color: var(--color-focus-blue, #20497e);
+  }
+}
+
 .body {
   padding: 15px 0 0;
 }

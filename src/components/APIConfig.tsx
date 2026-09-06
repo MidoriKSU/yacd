@@ -1,9 +1,20 @@
+import cx from 'clsx';
 import * as React from 'react';
 import { fetchConfigs } from 'src/api/configs';
+import { testNativeConnection } from 'src/api/singbox';
 import { BackendList } from 'src/components/BackendList';
-import { addClashAPIConfig, getClashAPIConfig } from 'src/store/app';
+import { NativeBackendList } from 'src/components/NativeBackendList';
+import {
+  addClashAPIConfig,
+  addNativeAPIConfig,
+  getClashAPIConfig,
+  getNativeAPIConfig,
+  hasSelectedClashBackend,
+  hasSelectedNativeBackend,
+} from 'src/store/app';
+import { closeModal } from 'src/store/modals';
 import { DispatchFn, State } from 'src/store/types';
-import { ClashAPIConfig } from 'src/types';
+import { ClashAPIConfig, NativeAPIConfig } from 'src/types';
 
 import s0 from './APIConfig.module.scss';
 import Button from './Button';
@@ -18,14 +29,32 @@ const Ok = 0;
 const noop = () => {};
 
 const mapState = (s: State) => ({
+  hasClash: hasSelectedClashBackend(s),
+  hasNative: hasSelectedNativeBackend(s),
   apiConfig: getClashAPIConfig(s),
+  nativeAPIConfig: getNativeAPIConfig(s),
 });
 
-function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
+function APIConfig({
+  dispatch,
+  hasClash,
+  hasNative,
+}: {
+  dispatch: DispatchFn;
+  hasClash: boolean;
+  hasNative: boolean;
+  apiConfig?: ClashAPIConfig;
+  nativeAPIConfig?: NativeAPIConfig;
+}) {
+  const [activeTab, setActiveTab] = useState<'clash' | 'native'>(() => {
+    if (hasNative && !hasClash) return 'native';
+    return 'clash';
+  });
   const [baseURL, setBaseURL] = useState('');
   const [secret, setSecret] = useState('');
   const [metaLabel, setMetaLabel] = useState('');
   const [errMsg, setErrMsg] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const userTouchedFlagRef = useRef(false);
   const contentEl = useRef<HTMLDivElement | null>(null);
@@ -50,16 +79,55 @@ function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
     }
   }, []);
 
-  const onConfirm = useCallback(() => {
+  const onConfirmClash = useCallback(() => {
     const normalized = normalizeClashURL(baseURL);
+    if (!normalized) {
+      setErrMsg('Invalid URL');
+      return;
+    }
+    setIsVerifying(true);
     verify({ baseURL: normalized, secret }).then((ret) => {
+      setIsVerifying(false);
       if (ret[0] !== Ok) {
-        setErrMsg(ret[1]);
+        setErrMsg(ret[1] || 'Failed to connect');
       } else {
         dispatch(addClashAPIConfig({ baseURL: normalized, secret, metaLabel }));
+        dispatch(closeModal('apiConfig'));
+        setBaseURL('');
+        setSecret('');
+        setMetaLabel('');
       }
     });
   }, [baseURL, secret, metaLabel, dispatch]);
+
+  const onConfirmNative = useCallback(() => {
+    const trimmed = (baseURL || '').trim();
+    if (!trimmed) {
+      setErrMsg('Invalid URL');
+      return;
+    }
+    setIsVerifying(true);
+    testNativeConnection(trimmed, secret).then((ret) => {
+      setIsVerifying(false);
+      if (!ret.ok) {
+        setErrMsg(ret.error || 'Failed to connect');
+      } else {
+        dispatch(addNativeAPIConfig({ baseURL: trimmed, secret, metaLabel }));
+        dispatch(closeModal('apiConfig'));
+        setBaseURL('');
+        setSecret('');
+        setMetaLabel('');
+      }
+    });
+  }, [baseURL, secret, metaLabel, dispatch]);
+
+  const onConfirm = useCallback(() => {
+    if (activeTab === 'native') {
+      onConfirmNative();
+    } else {
+      onConfirmClash();
+    }
+  }, [activeTab, onConfirmNative, onConfirmClash]);
 
   const handleContentOnKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -89,8 +157,10 @@ function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
   };
 
   useEffect(() => {
-    detectApiServer();
-  }, []);
+    if (activeTab === 'clash') {
+      detectApiServer();
+    }
+  }, [activeTab]);
 
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions
@@ -100,21 +170,51 @@ function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
           <SvgYacd width={160} height={160} stroke="var(--stroke)" />
         </div>
       </div>
+
+      <div className={s0.tabGroup}>
+        <button
+          type="button"
+          className={cx(s0.tabBtn, { [s0.tabActive]: activeTab === 'clash' })}
+          onClick={() => {
+            setActiveTab('clash');
+            setErrMsg('');
+            setBaseURL('');
+            setSecret('');
+            setMetaLabel('');
+          }}
+        >
+          Clash API
+        </button>
+        <button
+          type="button"
+          className={cx(s0.tabBtn, { [s0.tabActive]: activeTab === 'native' })}
+          onClick={() => {
+            setActiveTab('native');
+            setErrMsg('');
+            setBaseURL('');
+            setSecret('');
+            setMetaLabel('');
+          }}
+        >
+          sing-box Native API
+        </button>
+      </div>
+
       <div className={s0.body}>
         <div className={s0.hostnamePort}>
           <Field
             id="baseURL"
             name="baseURL"
-            label="API Base URL"
+            label={activeTab === 'native' ? 'Native API Base URL' : 'API Base URL'}
             type="text"
-            placeholder="http://127.0.0.1:9090"
+            placeholder={activeTab === 'native' ? 'http://127.0.0.1:9080' : 'http://127.0.0.1:9090'}
             value={baseURL}
             onChange={handleInputOnChange}
           />
           <Field
             id="secret"
             name="secret"
-            label="Secret(optional)"
+            label={activeTab === 'native' ? 'Native API Secret (optional)' : 'Secret(optional)'}
             value={secret}
             type="text"
             onChange={handleInputOnChange}
@@ -134,10 +234,10 @@ function APIConfig({ dispatch }: { dispatch: DispatchFn }) {
         </div>
       </div>
       <div className={s0.footer}>
-        <Button label="Add" onClick={onConfirm} />
+        <Button label="Add" onClick={onConfirm} isLoading={isVerifying} />
       </div>
       <div style={{ height: 20 }} />
-      <BackendList />
+      {activeTab === 'native' ? <NativeBackendList /> : <BackendList />}
     </div>
   );
 }

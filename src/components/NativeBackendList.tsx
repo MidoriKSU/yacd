@@ -52,7 +52,7 @@ function NativeBackendListImpl({
             key={item.baseURL + (item.secret || '') + (item.metaLabel || '')}
           >
             <Item
-              disableRemove={idx === selectedNativeAPIConfigIndex}
+              disableRemove={apiConfigs.length > 1 && idx === selectedNativeAPIConfigIndex}
               conf={item}
               onRemove={onRemove}
               onSelect={onSelect}

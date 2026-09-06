@@ -13,13 +13,13 @@ const STORAGE_KEY = {
   darkModePureBlackToggle: 'yacd_darkModePureBlackToggle',
 };
 
-export const getClashAPIConfig = (s: State) => {
-  const idx = s.app.selectedClashAPIConfigIndex;
-  return s.app.clashAPIConfigs[idx];
+export const getClashAPIConfig = (s: State): ClashAPIConfig | undefined => {
+  const idx = s.app.selectedClashAPIConfigIndex ?? 0;
+  return s.app.clashAPIConfigs?.[idx];
 };
-export const getSelectedClashAPIConfigIndex = (s: State) => s.app.selectedClashAPIConfigIndex;
-export const getClashAPIConfigs = (s: State) => s.app.clashAPIConfigs;
-export const getNativeAPIConfig = (s: State) => {
+export const getSelectedClashAPIConfigIndex = (s: State) => s.app.selectedClashAPIConfigIndex ?? 0;
+export const getClashAPIConfigs = (s: State) => s.app.clashAPIConfigs || [];
+export const getNativeAPIConfig = (s: State): NativeAPIConfig | undefined => {
   const idx = s.app.selectedNativeAPIConfigIndex ?? 0;
   return s.app.nativeAPIConfigs?.[idx];
 };
@@ -32,6 +32,36 @@ export const getSingBoxConfig = (s: State): SingBoxConfig => {
   }
   return s.app.singBoxConfig || singBoxClient.getCustomConfig();
 };
+
+export const hasSelectedClashBackend = (s: State): boolean => {
+  const configs = s.app.clashAPIConfigs;
+  if (!Array.isArray(configs) || configs.length === 0) return false;
+  const idx = s.app.selectedClashAPIConfigIndex ?? 0;
+  const conf = configs[idx];
+  return Boolean(conf && typeof conf.baseURL === 'string' && conf.baseURL.trim() !== '');
+};
+
+export const hasSelectedNativeBackend = (s: State): boolean => {
+  const configs = s.app.nativeAPIConfigs;
+  if (Array.isArray(configs) && configs.length > 0) {
+    const idx = s.app.selectedNativeAPIConfigIndex ?? 0;
+    const conf = configs[idx];
+    if (conf && typeof conf.baseURL === 'string' && conf.baseURL.trim() !== '') return true;
+  }
+  if (
+    s.app.singBoxConfig &&
+    typeof s.app.singBoxConfig.endpoint === 'string' &&
+    s.app.singBoxConfig.endpoint.trim() !== ''
+  ) {
+    return true;
+  }
+  return singBoxClient.getSnapshot().isConfigured;
+};
+
+export const hasAnyConfiguredBackend = (s: State): boolean => {
+  return hasSelectedClashBackend(s) || hasSelectedNativeBackend(s);
+};
+
 export const getTheme = (s: State) => s.app.theme;
 export const getSelectedChartStyleIndex = (s: State) => s.app.selectedChartStyleIndex;
 export const getLatencyTestUrl = (s: State) => s.app.latencyTestUrl;
@@ -58,23 +88,33 @@ export function addClashAPIConfig(conf: ClashAPIConfig) {
   return async (dispatch: DispatchFn, getState: GetStateFn) => {
     const idx = findClashAPIConfigIndex(getState, conf);
     // already exists
-    if (idx) return;
+    if (idx !== undefined) return;
 
     const clashAPIConfig = { ...conf, addedAt: Date.now() };
     dispatch('addClashAPIConfig', (s) => {
+      s.app.clashAPIConfigs = s.app.clashAPIConfigs || [];
       s.app.clashAPIConfigs.push(clashAPIConfig);
+      if (s.app.clashAPIConfigs.length === 1) {
+        s.app.selectedClashAPIConfigIndex = 0;
+      }
     });
     // side effect
     saveState(getState().app);
+    if (getState().app.clashAPIConfigs.length === 1) {
+      dispatch(fetchConfigs(clashAPIConfig));
+    }
   };
 }
 
 export function removeClashAPIConfig(conf: ClashAPIConfig) {
   return async (dispatch: DispatchFn, getState: GetStateFn) => {
     const idx = findClashAPIConfigIndex(getState, conf);
+    if (idx === undefined || idx === -1) return;
     dispatch('removeClashAPIConfig', (s) => {
       s.app.clashAPIConfigs.splice(idx, 1);
-      if (idx === s.app.selectedClashAPIConfigIndex) {
+      if (s.app.clashAPIConfigs.length === 0) {
+        s.app.selectedClashAPIConfigIndex = 0;
+      } else if (idx === s.app.selectedClashAPIConfigIndex) {
         s.app.selectedClashAPIConfigIndex = 0;
       } else if (idx < s.app.selectedClashAPIConfigIndex) {
         s.app.selectedClashAPIConfigIndex -= 1;
@@ -135,9 +175,16 @@ export function addNativeAPIConfig(conf: NativeAPIConfig) {
     dispatch('addNativeAPIConfig', (s) => {
       s.app.nativeAPIConfigs = s.app.nativeAPIConfigs || [];
       s.app.nativeAPIConfigs.push(nativeAPIConfig);
+      if (s.app.nativeAPIConfigs.length === 1) {
+        s.app.selectedNativeAPIConfigIndex = 0;
+        s.app.singBoxConfig = { endpoint: conf.baseURL, secret: conf.secret || '' };
+      }
     });
     // side effect
     saveState(getState().app);
+    if (getState().app.nativeAPIConfigs.length === 1) {
+      singBoxClient.setCustomConfig({ endpoint: conf.baseURL, secret: conf.secret || '' });
+    }
   };
 }
 
@@ -147,7 +194,10 @@ export function removeNativeAPIConfig(conf: NativeAPIConfig) {
     if (idx === -1) return;
     dispatch('removeNativeAPIConfig', (s) => {
       s.app.nativeAPIConfigs.splice(idx, 1);
-      if (idx === s.app.selectedNativeAPIConfigIndex) {
+      if (s.app.nativeAPIConfigs.length === 0) {
+        s.app.selectedNativeAPIConfigIndex = 0;
+        s.app.singBoxConfig = { endpoint: '', secret: '' };
+      } else if (idx === s.app.selectedNativeAPIConfigIndex) {
         s.app.selectedNativeAPIConfigIndex = 0;
       } else if (idx < s.app.selectedNativeAPIConfigIndex) {
         s.app.selectedNativeAPIConfigIndex -= 1;
@@ -156,8 +206,10 @@ export function removeNativeAPIConfig(conf: NativeAPIConfig) {
     // side effect
     saveState(getState().app);
     const active = getNativeAPIConfig(getState());
-    if (active) {
+    if (active && active.baseURL) {
       singBoxClient.setCustomConfig({ endpoint: active.baseURL, secret: active.secret || '' });
+    } else {
+      singBoxClient.setCustomConfig({ endpoint: '', secret: '' });
     }
   };
 }
@@ -176,6 +228,7 @@ export function selectNativeAPIConfig(conf: NativeAPIConfig) {
     // side effect
     saveState(getState().app);
     singBoxClient.setCustomConfig({ endpoint: conf.baseURL, secret: conf.secret || '' });
+    dispatch(closeModal('apiConfig'));
   };
 }
 
@@ -315,25 +368,12 @@ export function updateCollapsibleIsOpen(prefix: string, name: string, v: boolean
   };
 }
 
-const defaultClashAPIConfig = {
-  baseURL: document.getElementById('app')?.getAttribute('data-base-url') ?? 'http://127.0.0.1:9090',
-  secret: '',
-  addedAt: 0,
-};
-
-const defaultNativeAPIConfig = {
-  baseURL: 'http://127.0.0.1:9080',
-  secret: '',
-  addedAt: 0,
-};
-
-// type Theme = 'light' | 'dark';
 const defaultState: StateApp = {
   selectedClashAPIConfigIndex: 0,
-  clashAPIConfigs: [defaultClashAPIConfig],
+  clashAPIConfigs: [],
   selectedNativeAPIConfigIndex: 0,
-  nativeAPIConfigs: [defaultNativeAPIConfig],
-  singBoxConfig: { endpoint: 'http://127.0.0.1:9080', secret: '' },
+  nativeAPIConfigs: [],
+  singBoxConfig: { endpoint: '', secret: '' },
 
   latencyTestUrl: 'http://www.gstatic.com/generate_204',
   selectedChartStyleIndex: 0,
@@ -374,7 +414,16 @@ export function initialState() {
   let s = loadState();
   s = { ...defaultState, ...s };
 
-  if (!s.nativeAPIConfigs || s.nativeAPIConfigs.length === 0) {
+  if (!Array.isArray(s.clashAPIConfigs)) {
+    s.clashAPIConfigs = [];
+  }
+  const domBaseUrl = document.getElementById('app')?.getAttribute('data-base-url');
+  if (domBaseUrl && s.clashAPIConfigs.length === 0) {
+    s.clashAPIConfigs = [{ baseURL: domBaseUrl, secret: '', addedAt: 0 }];
+    s.selectedClashAPIConfigIndex = 0;
+  }
+
+  if (!Array.isArray(s.nativeAPIConfigs) || s.nativeAPIConfigs.length === 0) {
     if (s.singBoxConfig && s.singBoxConfig.endpoint) {
       s.nativeAPIConfigs = [
         {
@@ -383,11 +432,19 @@ export function initialState() {
           addedAt: 0,
         },
       ];
+      s.selectedNativeAPIConfigIndex = 0;
     } else {
-      s.nativeAPIConfigs = [defaultNativeAPIConfig];
+      s.nativeAPIConfigs = [];
     }
-    s.selectedNativeAPIConfigIndex = 0;
   }
+
+  if (
+    s.selectedClashAPIConfigIndex == null ||
+    s.selectedClashAPIConfigIndex >= s.clashAPIConfigs.length
+  ) {
+    s.selectedClashAPIConfigIndex = 0;
+  }
+
   if (
     s.selectedNativeAPIConfigIndex == null ||
     s.selectedNativeAPIConfigIndex >= s.nativeAPIConfigs.length
@@ -405,13 +462,11 @@ export function initialState() {
       endpoint: activeNative.baseURL,
       secret: activeNative.secret || '',
     };
-  } else if (s.singBoxConfig && (s.singBoxConfig.endpoint || s.singBoxConfig.secret)) {
+  } else if (s.singBoxConfig && s.singBoxConfig.endpoint) {
     singBoxClient.setCustomConfig(s.singBoxConfig);
   } else {
-    const clientConf = singBoxClient.getCustomConfig();
-    if (clientConf.endpoint || clientConf.secret) {
-      s.singBoxConfig = clientConf;
-    }
+    singBoxClient.setCustomConfig({ endpoint: '', secret: '' });
+    s.singBoxConfig = { endpoint: '', secret: '' };
   }
 
   const [query, sp, shouldUpdateAddressBar] = parseConfigQueryString();
@@ -419,29 +474,39 @@ export function initialState() {
     const target = location.pathname + location.hash + (sp.size > 0 ? `?${sp}` : '');
     history.replaceState(null, '', target);
   }
-  const conf = s.clashAPIConfigs[s.selectedClashAPIConfigIndex];
-  if (conf && conf.baseURL) {
-    try {
-      const url = new URL(conf.baseURL);
-      if (query.hostname) {
-        if (query.hostname.indexOf('http') === 0) {
-          url.href = decodeURIComponent(query.hostname);
-        } else {
-          url.hostname = query.hostname;
+  if (s.clashAPIConfigs.length > 0 && s.clashAPIConfigs[s.selectedClashAPIConfigIndex]) {
+    const conf = s.clashAPIConfigs[s.selectedClashAPIConfigIndex];
+    if (conf && conf.baseURL) {
+      try {
+        const url = new URL(conf.baseURL);
+        if (query.hostname) {
+          if (query.hostname.indexOf('http') === 0) {
+            url.href = decodeURIComponent(query.hostname);
+          } else {
+            url.hostname = query.hostname;
+          }
         }
+        if (query.port) {
+          url.port = query.port;
+        }
+        conf.baseURL = trimTrailingSlash(url.href);
+        if (query.secret) {
+          conf.secret = query.secret;
+        }
+      } catch {
+        // ignore invalid baseURL
       }
-      if (query.port) {
-        url.port = query.port;
-      }
-      // url.href is a stringifier and it appends a trailing slash
-      // that is not we want
-      conf.baseURL = trimTrailingSlash(url.href);
-      if (query.secret) {
-        conf.secret = query.secret;
-      }
-    } catch {
-      // ignore invalid baseURL
     }
+  } else if (query.hostname) {
+    const proto = query.hostname.indexOf('http') === 0 ? '' : 'http://';
+    const port = query.port ? `:${query.port}` : '';
+    const newConf = {
+      baseURL: trimTrailingSlash(`${proto}${query.hostname}${port}`),
+      secret: query.secret || '',
+      addedAt: Date.now(),
+    };
+    s.clashAPIConfigs = [newConf];
+    s.selectedClashAPIConfigIndex = 0;
   }
 
   if (query.theme === 'dark' || query.theme === 'light') {

@@ -10,10 +10,10 @@ const mapState = (s: State) => ({
   apiConfigs: getClashAPIConfigs(s),
 });
 
-function HeadImpl({ apiConfig, apiConfigs }: { apiConfig: ClashAPIConfig; apiConfigs: any[] }) {
+function HeadImpl({ apiConfig, apiConfigs }: { apiConfig?: ClashAPIConfig; apiConfigs: any[] }) {
   React.useEffect(() => {
     let title = 'Dashboard';
-    if (apiConfigs.length > 1) {
+    if (apiConfigs.length > 1 && apiConfig?.baseURL) {
       try {
         title = `${apiConfig.metaLabel || new URL(apiConfig.baseURL).host} - Dashboard`;
       } catch (e) {

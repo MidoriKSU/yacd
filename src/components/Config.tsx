@@ -369,7 +369,11 @@ function ConfigImpl({
         <div>
           <div className={s0.label}>
             {t('current_backend')}
-            <p>{getBackendContent(version) + apiConfig.baseURL}</p>
+            <p>
+              {apiConfig?.baseURL
+                ? getBackendContent(version) + apiConfig.baseURL
+                : t('unconfigured') || 'Not configured'}
+            </p>
           </div>
           <div className={s0.label}>Action</div>
           <Button
@@ -395,6 +399,7 @@ function ConfigImpl({
       </div>
 
       <div className={s0.section}>
+        <div aria-hidden="true" />
         <div>
           <div className={s0.label}>
             Native API
@@ -405,7 +410,7 @@ function ConfigImpl({
                   <br />
                 </>
               ) : null}
-              {nativeAPIConfig?.baseURL || singBoxConfig?.endpoint || 'http://127.0.0.1:9080'}
+              {nativeAPIConfig?.baseURL || singBoxConfig?.endpoint || (t('unconfigured') || 'Not configured')}
             </p>
           </div>
           <div className={s0.label}>Action</div>
