@@ -39,3 +39,55 @@
 .label {
   padding: 11px 0;
 }
+
+.nativeSection {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    'label1 label2'
+    'ctrl1  ctrl2';
+  max-width: 900px;
+  gap: 0 12px;
+  padding: 6px 8px 10px;
+
+  @media screen and (min-width: 30em) {
+    padding: 10px 40px 15px;
+    gap: 0 15px;
+  }
+
+  @media screen and (max-width: 350px) {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'label1'
+      'ctrl1'
+      'label2'
+      'ctrl2';
+  }
+
+  .label1 {
+    grid-area: label1;
+    padding: 11px 0;
+    align-self: start;
+  }
+
+  .label2 {
+    grid-area: label2;
+    padding: 11px 0;
+    align-self: start;
+  }
+
+  .control1 {
+    grid-area: ctrl1;
+  }
+
+  .control2 {
+    grid-area: ctrl2;
+  }
+
+  .optional {
+    color: var(--color-text-secondary);
+    font-size: 0.88em;
+    display: inline-block;
+  }
+}
+

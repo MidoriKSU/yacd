@@ -403,9 +403,12 @@ function ConfigImpl({
         <div />
       </div>
 
-      <div className={s0.section}>
-        <div>
-          <div className={s0.label}>Native API Base URL</div>
+      <div className={s0.nativeSection}>
+        <div className={s0.label1}>Native API Base URL</div>
+        <div className={s0.label2}>
+          Native API Secret <span className={s0.optional}>(optional)</span>
+        </div>
+        <div className={s0.control1}>
           <SelfControlledInput
             name="singBoxEndpoint"
             type="text"
@@ -414,8 +417,7 @@ function ConfigImpl({
             onBlur={handleSingBoxEndpointBlur}
           />
         </div>
-        <div>
-          <div className={s0.label}>Native API Secret (optional)</div>
+        <div className={s0.control2}>
           <SelfControlledInput
             name="singBoxSecret"
             type="password"
