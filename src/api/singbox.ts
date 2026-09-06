@@ -178,16 +178,23 @@ export class SingBoxClient {
   private abortController: AbortController | null = null;
   private listeners = new Set<(snapshot: SingBoxSnapshot) => void>();
   private reconnectTimer: any = null;
+  private watchdogTimer: any = null;
+  private streamGeneration = 0;
+  private lastStatusAt = 0;
+  private statusCount = 0;
+  private reconnectCount = 0;
+  private lastConnectAttemptAt = 0;
+  private lifecycleBound = false;
 
   private phase: SingBoxConnectionPhase = 'unconfigured';
   private error?: string;
   private currentStatus: SingBoxStatus | null = null;
 
   private chartListeners = new Set<() => void>();
-  private chartLabels: (number | string)[] = [];
-  private chartUp: (number | undefined)[] = [];
-  private chartDown: (number | undefined)[] = [];
-  private chartInuse: (number | undefined)[] = [];
+  private chartLabels: (number | string)[] = Array(CHART_SIZE).fill(0);
+  private chartUp: (number | undefined)[] = Array(CHART_SIZE).fill(undefined);
+  private chartDown: (number | undefined)[] = Array(CHART_SIZE).fill(undefined);
+  private chartInuse: (number | undefined)[] = Array(CHART_SIZE).fill(undefined);
 
   public readonly trafficChartSource: TrafficChartSource = {
     labels: this.chartLabels,
@@ -227,6 +234,8 @@ export class SingBoxClient {
       // ignore
     }
 
+    this.initLifecycleListeners();
+
     if (this.endpoint) {
       this.phase = 'connecting';
       setTimeout(() => this.startConnection(), 0);
@@ -252,9 +261,32 @@ export class SingBoxClient {
     };
   }
 
+  public resetChartHistory() {
+    this.chartLabels.length = CHART_SIZE;
+    this.chartLabels.fill(0);
+    this.chartUp.length = CHART_SIZE;
+    this.chartUp.fill(undefined);
+    this.chartDown.length = CHART_SIZE;
+    this.chartDown.fill(undefined);
+    this.chartInuse.length = CHART_SIZE;
+    this.chartInuse.fill(undefined);
+
+    for (const fn of this.chartListeners) {
+      try {
+        fn();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   public setCustomConfig(config: SingBoxConfig) {
-    this.endpoint = normalizeEndpoint(config.endpoint);
-    this.secret = (config.secret || '').trim();
+    const nextEndpoint = normalizeEndpoint(config.endpoint);
+    const nextSecret = (config.secret || '').trim();
+    const endpointChanged = this.endpoint !== nextEndpoint;
+
+    this.endpoint = nextEndpoint;
+    this.secret = nextSecret;
     try {
       if (this.endpoint || this.secret) {
         localStorage.setItem(
@@ -267,6 +299,12 @@ export class SingBoxClient {
     } catch {
       // ignore
     }
+
+    if (endpointChanged) {
+      this.currentStatus = null;
+      this.resetChartHistory();
+    }
+
     this.reconnect();
   }
 
@@ -294,11 +332,48 @@ export class SingBoxClient {
     };
   }
 
-  public reconnect() {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+  private initLifecycleListeners() {
+    if (typeof document === 'undefined' || this.lifecycleBound) return;
+    this.lifecycleBound = true;
+
+    const onActive = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        const now = Date.now();
+        if (now - this.lastConnectAttemptAt < 2000) {
+          return;
+        }
+        const isStale = !this.lastStatusAt || now - this.lastStatusAt > 2500;
+        if (this.endpoint && (this.phase !== 'connected' || isStale)) {
+          this.reconnect();
+        }
+      }
+    };
+
+    const onSuspend = () => {
+      if (this.watchdogTimer) {
+        clearTimeout(this.watchdogTimer);
+        this.watchdogTimer = null;
+      }
+    };
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        onActive();
+      } else {
+        onSuspend();
+      }
+    });
+    document.addEventListener('resume', onActive);
+    document.addEventListener('freeze', onSuspend);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pageshow', onActive);
+      window.addEventListener('online', onActive);
+      window.addEventListener('pagehide', onSuspend);
     }
+  }
+
+  public reconnect() {
+    this.reconnectCount++;
     this.closeExisting();
     this.startConnection();
   }
@@ -316,9 +391,36 @@ export class SingBoxClient {
   }
 
   private closeExisting() {
+    this.streamGeneration++;
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  private resetWatchdog() {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+    if (this.phase === 'connected' && this.endpoint) {
+      this.watchdogTimer = setTimeout(() => {
+        this.watchdogTimer = null;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+          return;
+        }
+        if (this.phase === 'connected') {
+          this.reconnect();
+        }
+      }, 5000);
     }
   }
 
@@ -331,6 +433,20 @@ export class SingBoxClient {
     return testNativeConnection(this.endpoint, this.effectiveSecret());
   }
 
+  public getDiagnostics() {
+    return {
+      streamGeneration: this.streamGeneration,
+      phase: this.phase,
+      endpoint: this.endpoint,
+      lastStatusAt: this.lastStatusAt,
+      statusCount: this.statusCount,
+      reconnectCount: this.reconnectCount,
+      reconnectTimerActive: Boolean(this.reconnectTimer),
+      watchdogTimerActive: Boolean(this.watchdogTimer),
+      visibilityState: typeof document !== 'undefined' ? document.visibilityState : 'unknown',
+    };
+  }
+
   private async startConnection() {
     const targetUrl = this.endpoint;
     if (!targetUrl) {
@@ -340,12 +456,15 @@ export class SingBoxClient {
       return;
     }
 
+    this.lastConnectAttemptAt = Date.now();
+    this.closeExisting();
+    const generation = this.streamGeneration;
+    const controller = new AbortController();
+    this.abortController = controller;
+
     this.phase = 'connecting';
     this.error = undefined;
     this.notify();
-
-    const controller = new AbortController();
-    this.abortController = controller;
 
     try {
       const secret = this.effectiveSecret();
@@ -371,9 +490,15 @@ export class SingBoxClient {
       );
 
       for await (const msg of statusStream) {
-        if (controller.signal.aborted) break;
+        if (generation !== this.streamGeneration || controller.signal.aborted) {
+          break;
+        }
         this.phase = 'connected';
         this.error = undefined;
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
         this.onNewStatus({
           trafficAvailable: Boolean(msg.trafficAvailable),
           uplink: Number(msg.uplink),
@@ -387,40 +512,57 @@ export class SingBoxClient {
         });
       }
 
-      if (!controller.signal.aborted) {
+      if (generation === this.streamGeneration && !controller.signal.aborted) {
         if (this.phase === 'connected') {
           this.phase = 'disconnected';
         } else {
           this.phase = 'error';
           this.error = 'Stream closed';
         }
+        if (this.watchdogTimer) {
+          clearTimeout(this.watchdogTimer);
+          this.watchdogTimer = null;
+        }
         this.notify();
         this.scheduleReconnect();
       }
     } catch (err: any) {
-      if (controller.signal.aborted && this.abortController !== controller) return;
+      if (generation !== this.streamGeneration || controller.signal.aborted) {
+        return;
+      }
       this.phase = 'error';
       this.error = err?.message || 'Failed to connect';
+      if (this.watchdogTimer) {
+        clearTimeout(this.watchdogTimer);
+        this.watchdogTimer = null;
+      }
       this.notify();
       this.scheduleReconnect();
     }
   }
 
   private onNewStatus(status: SingBoxStatus) {
+    this.phase = 'connected';
+    this.error = undefined;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.currentStatus = status;
+    this.lastStatusAt = Date.now();
+    this.statusCount++;
+    this.resetWatchdog();
+
+    this.chartLabels.shift();
+    this.chartUp.shift();
+    this.chartDown.shift();
+    this.chartInuse.shift();
 
     const now = Date.now();
     this.chartLabels.push(now);
     this.chartUp.push(status.trafficAvailable ? status.uplink : undefined);
     this.chartDown.push(status.trafficAvailable ? status.downlink : undefined);
     this.chartInuse.push(status.memory);
-
-    if (this.chartLabels.length > CHART_SIZE) {
-      this.chartLabels.shift();
-      this.chartUp.shift();
-      this.chartDown.shift();
-      this.chartInuse.shift();
-    }
 
     for (const fn of this.chartListeners) {
       try {
