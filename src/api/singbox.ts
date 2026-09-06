@@ -1,23 +1,18 @@
-// Native sing-box Service API client & adapter
-// Implements gRPC-Web (WebSocket & HTTP streaming) for daemon.StartedService
+// Minimal native sing-box Service API client & adapter
+// Implements daemon.StartedService/SubscribeStatus gRPC-Web streaming (WebSocket & HTTP)
+
 
 export interface SingBoxStatus {
-  memory: number; // in bytes (safe integer range for JS numbers up to 9 PB)
-  memoryRaw: bigint;
+  memory: number; // in bytes
+  memoryRaw?: bigint;
   goroutines: number;
-  connectionsIn: number;
-  connectionsOut: number;
+  connectionsIn?: number;
+  connectionsOut?: number;
   trafficAvailable: boolean;
-  uplink: number;
-  downlink: number;
-  uplinkTotal: number;
-  downlinkTotal: number;
-}
-
-export interface SingBoxMemoryPoint {
-  timestamp: number;
-  memory: number;
-  goroutines: number;
+  uplink: number; // bytes/s
+  downlink: number; // bytes/s
+  uplinkTotal: number; // bytes
+  downlinkTotal: number; // bytes
 }
 
 export type SingBoxConnectionPhase =
@@ -27,29 +22,30 @@ export type SingBoxConnectionPhase =
   | 'disconnected'
   | 'error';
 
-export type SingBoxResultState =
-  | 'Connected'
-  | 'Authentication Failed'
-  | 'Unreachable'
-  | 'Permission Denied'
-  | 'CORS Blocked'
-  | 'Browser Blocked'
-  | 'Transport Error';
-
 export interface SingBoxSnapshot {
   phase: SingBoxConnectionPhase;
-  resultState?: SingBoxResultState;
   error?: string;
   status: SingBoxStatus | null;
-  startedAt: number | null; // epoch ms
   endpoint: string;
   isConfigured: boolean;
-  history: SingBoxMemoryPoint[];
 }
 
 export interface SingBoxConfig {
   endpoint: string;
   secret: string;
+}
+
+export interface TrafficChartSource {
+  labels: string[];
+  up: number[];
+  down: number[];
+  subscribe: (fn: () => void) => () => void;
+}
+
+export interface MemoryChartSource {
+  labels: string[];
+  inuse: number[];
+  subscribe: (fn: () => void) => () => void;
 }
 
 export function normalizeEndpoint(raw: string): string {
@@ -94,9 +90,7 @@ export function validateEndpoint(raw: string): EndpointValidationResult {
     return { valid: false, error: 'Missing host in endpoint URL' };
   }
 
-  // Strip brackets from IPv6 hostnames like [::1]
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-
   const isLoopback =
     host === 'localhost' ||
     host === '127.0.0.1' ||
@@ -135,7 +129,6 @@ export function getTargetAddressSpace(urlStr: string): 'loopback' | 'local' | un
 export function getFetchInitWithLNA(init: RequestInit, targetUrl: string): RequestInit {
   const options: RequestInit = { ...init };
   const targetSpace = getTargetAddressSpace(targetUrl);
-  // Support W3C Local Network Access / Private Network Access when supported by browser
   if (
     targetSpace &&
     typeof Request !== 'undefined' &&
@@ -146,101 +139,21 @@ export function getFetchInitWithLNA(init: RequestInit, targetUrl: string): Reque
   return options;
 }
 
-export function classifyRequestError(err: any): { resultState: SingBoxResultState; message: string } {
-  if (err?.name === 'AbortError') {
-    return {
-      resultState: 'Unreachable',
-      message: 'Unreachable: Connection timed out (5s)',
-    };
-  }
-  if (err?.name === 'NotAllowedError') {
-    return {
-      resultState: 'Permission Denied',
-      message: 'Permission Denied: Local network access was not allowed by the browser',
-    };
-  }
-  if (err?.name === 'SecurityError') {
-    return {
-      resultState: 'Browser Blocked',
-      message: err?.message || 'Browser Blocked: Request was blocked by browser security policy',
-    };
-  }
-
-  const msg = (err?.message || '').toLowerCase();
-  if (msg.includes('permission')) {
-    return {
-      resultState: 'Permission Denied',
-      message: `Permission Denied: ${err?.message || 'Local network permission denied'}`,
-    };
-  }
-  if (msg.includes('cors') || msg.includes('cross-origin')) {
-    return {
-      resultState: 'CORS Blocked',
-      message: `CORS Blocked: ${err?.message || 'Cross-Origin Request Blocked'}`,
-    };
-  }
-  if (msg.includes('mixed content') || msg.includes('mixed-content') || msg.includes('blocked by client')) {
-    return {
-      resultState: 'Browser Blocked',
-      message: `Browser Blocked: ${err?.message || 'Insecure request blocked by browser'}`,
-    };
-  }
-
-  return {
-    resultState: 'Unreachable',
-    message: err?.message || 'Unreachable: Connection failed (server offline or port closed)',
-  };
-}
-
-// Format memory bytes using binary prefix (1024 base)
-export function formatMemoryBytes(value: number | bigint): string {
-  let num = Number(value);
-  if (!Number.isFinite(num) || num < 0) num = 0;
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let unitIndex = 0;
-  while (num >= 1024 && unitIndex < units.length - 1) {
-    num /= 1024;
-    unitIndex += 1;
-  }
-  const rounded = unitIndex === 0 ? String(Math.round(num)) : num.toFixed(1).replace(/\.0$/, '');
-  return `${rounded} ${units[unitIndex]}`;
-}
-
-// Format duration into readable uptime (e.g., "1d 2h 30m" or "02:15")
-export function formatUptime(startedAtMs: number, nowMs = Date.now()): string {
-  let seconds = Math.max(0, Math.floor((nowMs - startedAtMs) / 1000));
-  const days = Math.floor(seconds / 86400);
-  seconds %= 86400;
-  const hours = Math.floor(seconds / 3600);
-  seconds %= 3600;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-
-  const pad = (n: number) => String(n).padStart(2, '0');
-  if (days > 0) {
-    return `${days}d ${hours}h ${pad(minutes)}m`;
-  }
-  if (hours > 0) {
-    return `${hours}h ${pad(minutes)}m ${pad(secs)}s`;
-  }
-  return `${minutes}m ${pad(secs)}s`;
-}
-
-// Protobuf varint helper
-function decodeVarint(bytes: Uint8Array, offset = 0): [bigint, number] {
+// Protobuf wire-format helpers
+export function decodeVarint(bytes: Uint8Array, offset: number): [bigint, number] {
   let result = 0n;
   let shift = 0n;
   let i = offset;
   while (i < bytes.length) {
     const byte = bytes[i++];
     result |= BigInt(byte & 0x7f) << shift;
-    shift += 7n;
     if ((byte & 0x80) === 0) break;
+    shift += 7n;
   }
   return [result, i];
 }
 
-function encodeVarint(val: bigint | number): Uint8Array {
+export function encodeVarint(val: bigint | number): Uint8Array {
   let v = BigInt(val);
   const bytes: number[] = [];
   while (v >= 0x80n) {
@@ -274,7 +187,6 @@ export function decodeStatus(bytes: Uint8Array): SingBoxStatus {
     const wire = Number(tag & 0x07n);
 
     if (wire === 0) {
-      // Varint
       const [val, nextVal] = decodeVarint(bytes, i);
       i = nextVal;
       switch (field) {
@@ -308,7 +220,6 @@ export function decodeStatus(bytes: Uint8Array): SingBoxStatus {
           break;
       }
     } else if (wire === 2) {
-      // Length-delimited
       const [len, nextLen] = decodeVarint(bytes, i);
       i = nextLen + Number(len);
     } else if (wire === 1) {
@@ -322,7 +233,6 @@ export function decodeStatus(bytes: Uint8Array): SingBoxStatus {
   return s;
 }
 
-// Decode daemon.StartedAt protobuf message
 export function decodeStartedAt(bytes: Uint8Array): number | null {
   let i = 0;
   let startedAt: number | null = null;
@@ -349,7 +259,25 @@ export function decodeStartedAt(bytes: Uint8Array): number | null {
   return startedAt;
 }
 
-// Parse gRPC-Web trailer headers (from text/plain trailer frames)
+export function formatUptime(epochMs: number): string {
+  const diffSec = Math.max(0, Math.floor((Date.now() - epochMs) / 1000));
+  const h = Math.floor(diffSec / 3600);
+  const m = Math.floor((diffSec % 3600) / 60);
+  const s = diffSec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+const MEM_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+export function formatMemoryBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  if (n < 1000) return n + ' B';
+  const exponent = Math.min(Math.floor(Math.log10(n) / 3), MEM_UNITS.length - 1);
+  const formatted = Number((n / Math.pow(1000, exponent)).toPrecision(3));
+  return `${formatted} ${MEM_UNITS[exponent]}`;
+}
+
 export function parseGrpcTrailers(text: string): { grpcStatus?: string; grpcMessage?: string } {
   const lines = text.split(/\r?\n/);
   let grpcStatus: string | undefined;
@@ -374,7 +302,7 @@ export function parseGrpcTrailers(text: string): { grpcStatus?: string; grpcMess
 }
 
 // Build 5-byte framed SubscribeStatusRequest protobuf message (interval = 1s = 1e9 ns)
-function buildSubscribeStatusPayload(): Uint8Array {
+export function buildSubscribeStatusPayload(): Uint8Array {
   // tag: field 1, wire type 0 = (1 << 3) | 0 = 0x08
   const tag = new Uint8Array([0x08]);
   const varintInterval = encodeVarint(1_000_000_000n);
@@ -394,10 +322,6 @@ function buildSubscribeStatusPayload(): Uint8Array {
 }
 
 // Build 6-byte framed SubscribeStatusRequest protobuf message for grpc-websockets:
-// byte 0: 0x00 (improbable-eng websocket DATA signal)
-// byte 1: 0x00 (gRPC-Web flag: uncompressed data)
-// bytes 2..5: 4-byte big-endian length of protobuf payload
-// bytes 6..: protobuf payload
 export function buildSubscribeStatusWsPayload(): Uint8Array {
   const grpcFrame = buildSubscribeStatusPayload();
   const wsFrame = new Uint8Array(1 + grpcFrame.length);
@@ -406,34 +330,18 @@ export function buildSubscribeStatusWsPayload(): Uint8Array {
   return wsFrame;
 }
 
-export interface TrafficChartSource {
-  labels: string[];
-  up: number[];
-  down: number[];
-  subscribe: (fn: () => void) => () => void;
-}
-
-export interface MemoryChartSource {
-  labels: string[];
-  inuse: number[];
-  subscribe: (fn: () => void) => () => void;
-}
-
 const STORAGE_CONFIG_KEY = 'yacd.singbox.config';
-const LEGACY_STORAGE_ENDPOINT_KEY = 'yacd.singbox.service_endpoint';
 const MAX_HISTORY_POINTS = 60;
 
 export class SingBoxClient {
   private ws: WebSocket | null = null;
   private abortController: AbortController | null = null;
   private listeners = new Set<(snapshot: SingBoxSnapshot) => void>();
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: any = null;
 
   private phase: SingBoxConnectionPhase = 'unconfigured';
   private error?: string;
   private currentStatus: SingBoxStatus | null = null;
-  private startedAt: number | null = null;
-  private history: SingBoxMemoryPoint[] = [];
 
   private chartListeners = new Set<() => void>();
   private chartLabels: string[] = [];
@@ -466,7 +374,6 @@ export class SingBoxClient {
 
   private endpoint = '';
   private secret = '';
-  private resultState?: SingBoxResultState;
 
   constructor() {
     try {
@@ -475,11 +382,6 @@ export class SingBoxClient {
         const parsed = JSON.parse(stored);
         this.endpoint = normalizeEndpoint(parsed.endpoint || '');
         this.secret = (parsed.secret || '').trim();
-      } else {
-        const legacy = localStorage.getItem(LEGACY_STORAGE_ENDPOINT_KEY);
-        if (legacy) {
-          this.endpoint = normalizeEndpoint(legacy);
-        }
       }
     } catch {
       // ignore
@@ -496,13 +398,10 @@ export class SingBoxClient {
   public getSnapshot(): SingBoxSnapshot {
     return {
       phase: this.phase,
-      resultState: this.resultState,
       error: this.error,
       status: this.currentStatus,
-      startedAt: this.startedAt,
       endpoint: this.endpoint,
       isConfigured: Boolean(this.endpoint),
-      history: this.history,
     };
   }
 
@@ -525,7 +424,6 @@ export class SingBoxClient {
       } else {
         localStorage.removeItem(STORAGE_CONFIG_KEY);
       }
-      localStorage.removeItem(LEGACY_STORAGE_ENDPOINT_KEY);
     } catch {
       // ignore
     }
@@ -534,6 +432,10 @@ export class SingBoxClient {
 
   public setCustomEndpoint(url: string) {
     this.setCustomConfig({ endpoint: url, secret: this.secret });
+  }
+
+  public updateConfig(baseURL: string, secret?: string) {
+    this.setCustomConfig({ endpoint: baseURL, secret: secret || '' });
   }
 
   public effectiveUrl(): string {
@@ -552,6 +454,15 @@ export class SingBoxClient {
     };
   }
 
+  public reconnect() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.closeExisting();
+    this.startConnection();
+  }
+
   private notify() {
     const snap = this.getSnapshot();
     for (const l of this.listeners) {
@@ -564,419 +475,7 @@ export class SingBoxClient {
     }
   }
 
-  private async testConnectionWebSocket(
-    url: string,
-    secret: string,
-    timeoutMs = 5000
-  ): Promise<{
-    ok: boolean;
-    resultState: SingBoxResultState;
-    message: string;
-    latency?: number;
-  }> {
-    return new Promise((resolve) => {
-      if (typeof WebSocket === 'undefined') {
-        resolve({
-          ok: false,
-          resultState: 'Transport Error',
-          message: 'WebSocket not supported in this environment',
-        });
-        return;
-      }
-
-      const start = performance.now();
-      const wsUrl =
-        url.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:') +
-        '/daemon.StartedService/GetStartedAt';
-
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      let finished = false;
-      let ws: WebSocket;
-
-      const cleanup = () => {
-        finished = true;
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-        try {
-          ws.close();
-        } catch {
-          // ignore
-        }
-      };
-
-      const done = (result: {
-        ok: boolean;
-        resultState: SingBoxResultState;
-        message: string;
-        latency?: number;
-      }) => {
-        if (finished) return;
-        cleanup();
-        resolve(result);
-      };
-
-      timer = setTimeout(() => {
-        done({
-          ok: false,
-          resultState: 'Unreachable',
-          message: 'Unreachable: Connection timed out (5s)',
-          latency: Math.round(performance.now() - start),
-        });
-      }, timeoutMs);
-
-      try {
-        ws = new WebSocket(wsUrl, ['grpc-websockets']);
-        ws.binaryType = 'arraybuffer';
-      } catch (err: any) {
-        const elapsed = Math.round(performance.now() - start);
-        const classified = classifyRequestError(err);
-        done({
-          ok: false,
-          resultState: classified.resultState,
-          message: classified.message,
-          latency: elapsed,
-        });
-        return;
-      }
-
-      let buffer = new Uint8Array(0);
-      let hasData = false;
-      let startedAt: number | null = null;
-
-      ws.onopen = () => {
-        try {
-          let headers =
-            'content-type: application/grpc-web+proto\r\nx-grpc-web: 1\r\n';
-          if (secret) {
-            headers += `authorization: Bearer ${secret}\r\n`;
-          }
-          headers += '\r\n';
-          ws.send(new TextEncoder().encode(headers));
-
-          // 6 bytes: 0x00 (ws signal) + 5 bytes gRPC empty frame [0x00, 0x00, 0x00, 0x00, 0x00]
-          const emptyFrame = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-          ws.send(emptyFrame);
-          ws.send(new Uint8Array([1]));
-        } catch (err: any) {
-          const elapsed = Math.round(performance.now() - start);
-          done({
-            ok: false,
-            resultState: 'Transport Error',
-            message: err?.message || 'Failed to send WebSocket probe',
-            latency: elapsed,
-          });
-        }
-      };
-
-      ws.onmessage = (evt) => {
-        const elapsed = Math.round(performance.now() - start);
-        const chunk = new Uint8Array(evt.data as ArrayBuffer);
-        const merged = new Uint8Array(buffer.length + chunk.length);
-        merged.set(buffer);
-        merged.set(chunk, buffer.length);
-        buffer = merged;
-
-        while (buffer.length >= 5) {
-          const flag = buffer[0];
-          const len =
-            ((buffer[1] << 24) |
-              (buffer[2] << 16) |
-              (buffer[3] << 8) |
-              buffer[4]) >>> 0;
-          if (buffer.length < 5 + len) break;
-
-          const body = buffer.slice(5, 5 + len);
-          buffer = buffer.slice(5 + len);
-
-          if ((flag & 0x80) !== 0) {
-            const trailerText = new TextDecoder().decode(body);
-            const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
-            if (grpcStatus && grpcStatus !== '0') {
-              if (grpcStatus === '16' || grpcStatus === '7') {
-                done({
-                  ok: false,
-                  resultState: 'Authentication Failed',
-                  message: `Authentication Failed: ${grpcMessage || 'secret invalid'}`,
-                  latency: elapsed,
-                });
-                return;
-              }
-              done({
-                ok: false,
-                resultState: 'Transport Error',
-                message: `Transport Error (gRPC ${grpcStatus}): ${grpcMessage || 'RPC failed'}`,
-                latency: elapsed,
-              });
-              return;
-            }
-          } else {
-            hasData = true;
-            startedAt = decodeStartedAt(body);
-          }
-        }
-
-        if (hasData) {
-          done({
-            ok: true,
-            resultState: 'Connected',
-            message: startedAt
-              ? `Connected (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
-              : `Connected (${elapsed}ms)`,
-            latency: elapsed,
-          });
-        }
-      };
-
-      ws.onerror = (evt: any) => {
-        const elapsed = Math.round(performance.now() - start);
-        const classified = classifyRequestError(evt?.error || evt);
-        done({
-          ok: false,
-          resultState: classified.resultState,
-          message: classified.message,
-          latency: elapsed,
-        });
-      };
-
-      ws.onclose = (evt) => {
-        const elapsed = Math.round(performance.now() - start);
-        if (hasData) {
-          done({
-            ok: true,
-            resultState: 'Connected',
-            message: startedAt
-              ? `Connected (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
-              : `Connected (${elapsed}ms)`,
-            latency: elapsed,
-          });
-        } else {
-          if (evt.code === 4001 || evt.code === 4003 || evt.code === 4016) {
-            done({
-              ok: false,
-              resultState: 'Authentication Failed',
-              message: `Authentication Failed (${evt.code}): ${evt.reason || 'secret invalid'}`,
-              latency: elapsed,
-            });
-          } else {
-            done({
-              ok: false,
-              resultState: 'Unreachable',
-              message: evt.reason ? `Connection closed: ${evt.reason}` : 'Connection closed without response',
-              latency: elapsed,
-            });
-          }
-        }
-      };
-    });
-  }
-
-  public async testConnection(
-    rawUrl?: string,
-    rawSecret?: string
-  ): Promise<{
-    ok: boolean;
-    resultState: SingBoxResultState;
-    message: string;
-    latency?: number;
-  }> {
-    const raw = rawUrl !== undefined ? rawUrl : this.endpoint;
-    const validation = validateEndpoint(raw);
-    if (!validation.valid || !validation.url) {
-      return {
-        ok: false,
-        resultState: 'Transport Error',
-        message: validation.error || 'Invalid endpoint URL format',
-      };
-    }
-    const url = validation.url;
-    const secret = (rawSecret !== undefined ? rawSecret : this.secret).trim();
-
-    const start = performance.now();
-    try {
-      const httpUrl = url + '/daemon.StartedService/GetStartedAt';
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/grpc-web+proto',
-        'X-Grpc-Web': '1',
-      };
-      if (secret) {
-        headers['Authorization'] = `Bearer ${secret}`;
-      }
-      const emptyFrame = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]);
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const fetchInit = getFetchInitWithLNA(
-        {
-          method: 'POST',
-          headers,
-          body: emptyFrame,
-          signal: controller.signal,
-        },
-        url
-      );
-
-      const res = await fetch(httpUrl, fetchInit);
-      clearTimeout(timeoutId);
-
-      const elapsed = Math.round(performance.now() - start);
-
-      if (res.status === 401 || res.status === 403) {
-        return {
-          ok: false,
-          resultState: 'Authentication Failed',
-          message: `Authentication Failed (${res.status}): secret invalid`,
-          latency: elapsed,
-        };
-      }
-
-      if (res.status === 404) {
-        return {
-          ok: false,
-          resultState: 'Transport Error',
-          message:
-            'Service API unavailable (HTTP 404): sing-box Service API is not enabled or path not mapped on this port',
-          latency: elapsed,
-        };
-      }
-
-      if (!res.ok) {
-        return {
-          ok: false,
-          resultState: 'Transport Error',
-          message: `Transport Error (HTTP ${res.status}): ${res.statusText}`,
-          latency: elapsed,
-        };
-      }
-
-      const headerGrpcStatus = res.headers.get('grpc-status');
-      if (headerGrpcStatus && headerGrpcStatus !== '0') {
-        const grpcMessage = res.headers.get('grpc-message') || `code ${headerGrpcStatus}`;
-        if (headerGrpcStatus === '16' || headerGrpcStatus === '7') {
-          return {
-            ok: false,
-            resultState: 'Authentication Failed',
-            message: `Authentication Failed: ${grpcMessage}`,
-            latency: elapsed,
-          };
-        }
-        return {
-          ok: false,
-          resultState: 'Transport Error',
-          message: `Transport Error: ${grpcMessage}`,
-          latency: elapsed,
-        };
-      }
-
-      const buf = new Uint8Array(await res.arrayBuffer());
-      let offset = 0;
-      let startedAt: number | null = null;
-      let hasData = false;
-
-      while (offset + 5 <= buf.length) {
-        const flag = buf[offset];
-        const len =
-          ((buf[offset + 1] << 24) |
-            (buf[offset + 2] << 16) |
-            (buf[offset + 3] << 8) |
-            buf[offset + 4]) >>> 0;
-        if (offset + 5 + len > buf.length) break;
-
-        const body = buf.slice(offset + 5, offset + 5 + len);
-        offset += 5 + len;
-
-        if ((flag & 0x80) !== 0) {
-          // Trailer frame
-          const trailerText = new TextDecoder().decode(body);
-          const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
-          if (grpcStatus && grpcStatus !== '0') {
-            if (grpcStatus === '16' || grpcStatus === '7') {
-              return {
-                ok: false,
-                resultState: 'Authentication Failed',
-                message: `Authentication Failed: ${grpcMessage || 'secret invalid'}`,
-                latency: elapsed,
-              };
-            }
-            return {
-              ok: false,
-              resultState: 'Transport Error',
-              message: `Transport Error (gRPC ${grpcStatus}): ${grpcMessage || 'RPC failed'}`,
-              latency: elapsed,
-            };
-          }
-        } else {
-          // Data frame
-          hasData = true;
-          startedAt = decodeStartedAt(body);
-        }
-      }
-
-      if (!hasData) {
-        return {
-          ok: false,
-          resultState: 'Transport Error',
-          message: 'Transport Error: Empty response from Service API',
-          latency: elapsed,
-        };
-      }
-
-      return {
-        ok: true,
-        resultState: 'Connected',
-        message: startedAt
-          ? `Connected (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
-          : `Connected (${elapsed}ms)`,
-        latency: elapsed,
-      };
-    } catch (err: any) {
-      if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined') {
-        try {
-          const wsRes = await this.testConnectionWebSocket(url, secret);
-          if (wsRes.ok || wsRes.resultState === 'Authentication Failed') {
-            return wsRes;
-          }
-        } catch {
-          // ignore
-        }
-      }
-      const elapsed = Math.round(performance.now() - start);
-      const classified = classifyRequestError(err);
-      return {
-        ok: false,
-        resultState: classified.resultState,
-        message: classified.message,
-        latency: elapsed,
-      };
-    }
-  }
-
-  public reconnect() {
-    this.cleanup();
-    if (!this.endpoint) {
-      this.phase = 'unconfigured';
-      this.resultState = undefined;
-      this.error = undefined;
-      this.currentStatus = null;
-      this.startedAt = null;
-      this.history = [];
-      this.chartLabels.length = 0;
-      this.chartUp.length = 0;
-      this.chartDown.length = 0;
-      this.chartInuse.length = 0;
-      this.notify();
-      return;
-    }
-    this.startConnection();
-  }
-
-  private cleanup() {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+  private closeExisting() {
     if (this.ws) {
       try {
         this.ws.close();
@@ -995,25 +494,20 @@ export class SingBoxClient {
     const targetUrl = this.endpoint;
     if (!targetUrl) {
       this.phase = 'unconfigured';
-      this.resultState = undefined;
       this.error = undefined;
       this.notify();
       return;
     }
 
     this.phase = 'connecting';
-    this.resultState = undefined;
     this.error = undefined;
     this.notify();
 
-    // Prefer WebSocket with grpc-websockets subprotocol for browser compatibility
     if (typeof WebSocket !== 'undefined') {
       this.connectWebSocket(targetUrl);
     } else {
       this.connectHttpStream(targetUrl);
     }
-    // Fetch StartedAt timestamp concurrently
-    this.fetchStartedAt(targetUrl);
   }
 
   private connectWebSocket(baseUrl: string) {
@@ -1063,25 +557,17 @@ export class SingBoxClient {
             const trailerText = new TextDecoder().decode(body);
             const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
             if (grpcStatus && grpcStatus !== '0') {
-              if (grpcStatus === '16' || grpcStatus === '7') {
-                this.phase = 'error';
-                this.resultState = 'Authentication Failed';
-                this.error = `Authentication Failed: ${grpcMessage || 'secret invalid'}`;
-              } else {
-                this.phase = 'error';
-                this.resultState = 'Transport Error';
-                this.error = `gRPC Error (${grpcStatus}): ${grpcMessage || 'stream failed'}`;
-              }
+              this.phase = 'error';
+              this.error = `gRPC Error (${grpcStatus}): ${grpcMessage || 'stream failed'}`;
               this.notify();
               this.scheduleReconnect();
               return;
             }
           } else {
-            // Valid telemetry data frame!
+            // Valid telemetry status data frame
             try {
               const status = decodeStatus(body);
               this.phase = 'connected';
-              this.resultState = 'Connected';
               this.error = undefined;
               this.onNewStatus(status);
             } catch (err) {
@@ -1094,7 +580,6 @@ export class SingBoxClient {
 
       ws.onerror = () => {
         if (this.phase === 'connecting') {
-          // Fall back to HTTP stream if WebSocket fails
           this.ws = null;
           this.connectHttpStream(baseUrl);
         }
@@ -1107,13 +592,7 @@ export class SingBoxClient {
             this.phase = 'disconnected';
           } else {
             this.phase = 'error';
-            if (evt.code === 4001 || evt.code === 4003 || evt.code === 4016) {
-              this.resultState = 'Authentication Failed';
-              this.error = `Authentication Failed (${evt.code}): ${evt.reason || 'secret invalid'}`;
-            } else {
-              this.resultState = this.resultState || 'Transport Error';
-              this.error = this.error || (evt.reason ? `Connection closed: ${evt.reason}` : 'Connection closed');
-            }
+            this.error = evt.reason ? `Connection closed: ${evt.reason}` : 'Connection closed';
           }
           this.notify();
           this.scheduleReconnect();
@@ -1157,24 +636,17 @@ export class SingBoxClient {
       clearTimeout(connectTimer);
 
       if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          throw new Error(`Unauthorized (${res.status}): check secret`);
-        }
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
 
       const headerGrpcStatus = res.headers.get('grpc-status');
       if (headerGrpcStatus && headerGrpcStatus !== '0') {
         const msg = res.headers.get('grpc-message') || `code ${headerGrpcStatus}`;
-        if (headerGrpcStatus === '16' || headerGrpcStatus === '7') {
-          this.phase = 'error';
-          this.resultState = 'Authentication Failed';
-          this.error = `Authentication Failed: ${msg}`;
-          this.notify();
-          this.scheduleReconnect();
-          return;
-        }
-        throw new Error(`gRPC Error (${headerGrpcStatus}): ${msg}`);
+        this.phase = 'error';
+        this.error = `gRPC Error (${headerGrpcStatus}): ${msg}`;
+        this.notify();
+        this.scheduleReconnect();
+        return;
       }
 
       if (!res.body) {
@@ -1203,29 +675,19 @@ export class SingBoxClient {
             buffer = buffer.slice(5 + len);
 
             if ((flag & 0x80) !== 0) {
-              // Trailer frame
               const trailerText = new TextDecoder().decode(body);
               const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
               if (grpcStatus && grpcStatus !== '0') {
-                if (grpcStatus === '16' || grpcStatus === '7') {
-                  this.phase = 'error';
-                  this.resultState = 'Authentication Failed';
-                  this.error = `Authentication Failed: ${grpcMessage || 'secret invalid'}`;
-                } else {
-                  this.phase = 'error';
-                  this.resultState = 'Transport Error';
-                  this.error = `gRPC Error (${grpcStatus}): ${grpcMessage || 'stream failed'}`;
-                }
+                this.phase = 'error';
+                this.error = `gRPC Error (${grpcStatus}): ${grpcMessage || 'stream failed'}`;
                 this.notify();
                 this.scheduleReconnect();
                 return;
               }
             } else {
-              // Valid telemetry data frame!
               try {
                 const status = decodeStatus(body);
                 this.phase = 'connected';
-                this.resultState = 'Connected';
                 this.error = undefined;
                 this.onNewStatus(status);
               } catch (err) {
@@ -1241,8 +703,7 @@ export class SingBoxClient {
         this.phase = 'disconnected';
       } else {
         this.phase = 'error';
-        this.resultState = this.resultState || 'Transport Error';
-        this.error = this.error || 'Connection closed without telemetry';
+        this.error = 'Connection closed without telemetry';
       }
       this.notify();
       this.scheduleReconnect();
@@ -1250,81 +711,17 @@ export class SingBoxClient {
       clearTimeout(connectTimer);
       if (controller.signal.aborted && this.abortController !== controller) return;
       this.phase = 'error';
-      const classified = classifyRequestError(err);
-      this.resultState = classified.resultState;
-      this.error = classified.resultState;
+      this.error = err?.message || 'Transport Error';
       this.notify();
       this.scheduleReconnect();
-    }
-  }
-
-  private async fetchStartedAt(baseUrl: string) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    try {
-      const httpUrl = baseUrl + '/daemon.StartedService/GetStartedAt';
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/grpc-web+proto',
-        'X-Grpc-Web': '1',
-      };
-      const secret = this.effectiveSecret();
-      if (secret) {
-        headers['Authorization'] = `Bearer ${secret}`;
-      }
-      // Empty gRPC frame
-      const emptyFrame = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00]);
-      const fetchInit = getFetchInitWithLNA(
-        {
-          method: 'POST',
-          headers,
-          body: emptyFrame,
-          signal: controller.signal,
-        },
-        baseUrl
-      );
-      const res = await fetch(httpUrl, fetchInit);
-      if (res.ok) {
-        const buf = new Uint8Array(await res.arrayBuffer());
-        let offset = 0;
-        while (offset + 5 <= buf.length) {
-          const flag = buf[offset];
-          const len =
-            ((buf[offset + 1] << 24) |
-              (buf[offset + 2] << 16) |
-              (buf[offset + 3] << 8) |
-              buf[offset + 4]) >>> 0;
-          if (offset + 5 + len > buf.length) break;
-          const body = buf.slice(offset + 5, offset + 5 + len);
-          offset += 5 + len;
-          if ((flag & 0x80) === 0) {
-            const val = decodeStartedAt(body);
-            if (val) {
-              this.startedAt = val;
-              this.notify();
-            }
-          }
-        }
-      }
-    } catch {
-      // ignore
-    } finally {
-      clearTimeout(timer);
     }
   }
 
   private onNewStatus(status: SingBoxStatus) {
     this.currentStatus = status;
     const now = Date.now();
-    this.history.push({
-      timestamp: now,
-      memory: status.memory,
-      goroutines: status.goroutines,
-    });
-    if (this.history.length > MAX_HISTORY_POINTS) {
-      this.history.shift();
-    }
-
     const timeLabel = new Date(now).toLocaleTimeString();
+
     this.chartLabels.push(timeLabel);
     if (this.chartLabels.length > MAX_HISTORY_POINTS) {
       this.chartLabels.shift();

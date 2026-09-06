@@ -9,9 +9,9 @@ import {
 } from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import * as logsApi from 'src/api/logs';
+import { SingBoxConfig } from 'src/api/singbox';
 import { fetchVersion } from 'src/api/version';
 import Select from 'src/components/shared/Select';
-import { SingBoxConfigSection } from 'src/components/SingBoxConfigSection';
 import { ClashGeneralConfig, DispatchFn, State } from 'src/store/types';
 import { ClashAPIConfig } from 'src/types';
 
@@ -20,6 +20,8 @@ import {
   getClashAPIConfig,
   getLatencyTestUrl,
   getSelectedChartStyleIndex,
+  getSingBoxConfig,
+  updateSingBoxConfig,
 } from '../store/app';
 import { fetchConfigs, flushFakeIPPool, getConfigs, reloadConfigs, updateConfigs, updateGeoDatabasesFile } from '../store/configs';
 import { openModal } from '../store/modals';
@@ -66,6 +68,7 @@ const mapState2 = (s: State) => ({
   selectedChartStyleIndex: getSelectedChartStyleIndex(s),
   latencyTestUrl: getLatencyTestUrl(s),
   apiConfig: getClashAPIConfig(s),
+  singBoxConfig: getSingBoxConfig(s),
 });
 
 const Config = connect(mapState2)(ConfigImpl);
@@ -92,6 +95,7 @@ type ConfigImplProps = {
   selectedChartStyleIndex: number;
   latencyTestUrl: string;
   apiConfig: ClashAPIConfig;
+  singBoxConfig: SingBoxConfig;
 };
 
 function getBackendContent(version: any): string {
@@ -110,6 +114,7 @@ function ConfigImpl({
   selectedChartStyleIndex,
   latencyTestUrl,
   apiConfig,
+  singBoxConfig,
 }: ConfigImplProps) {
   const [configState, setConfigStateInternal] = useState(configs);
   const refConfigs = useRef(configs);
@@ -214,6 +219,20 @@ function ConfigImpl({
   const handleUpdateGeoDatabasesFile = useCallback(() => {
     dispatch(updateGeoDatabasesFile(apiConfig));
   }, [apiConfig, dispatch]);
+
+  const handleSingBoxEndpointBlur = useCallback<React.FocusEventHandler<HTMLInputElement>>(
+    (e) => {
+      dispatch(updateSingBoxConfig({ endpoint: e.target.value.trim(), secret: singBoxConfig?.secret || '' }));
+    },
+    [dispatch, singBoxConfig],
+  );
+
+  const handleSingBoxSecretBlur = useCallback<React.FocusEventHandler<HTMLInputElement>>(
+    (e) => {
+      dispatch(updateSingBoxConfig({ endpoint: singBoxConfig?.endpoint || '', secret: e.target.value.trim() }));
+    },
+    [dispatch, singBoxConfig],
+  );
 
   const mode = useMemo(() => {
     const m = configState.mode;
@@ -384,8 +403,27 @@ function ConfigImpl({
         <div />
       </div>
 
-      <div className={s0.singboxSection}>
-        <SingBoxConfigSection clashAPIConfig={apiConfig} />
+      <div className={s0.section}>
+        <div>
+          <div className={s0.label}>Native API Base URL</div>
+          <SelfControlledInput
+            name="singBoxEndpoint"
+            type="text"
+            value={singBoxConfig?.endpoint || ''}
+            placeholder="http://127.0.0.1:9080"
+            onBlur={handleSingBoxEndpointBlur}
+          />
+        </div>
+        <div>
+          <div className={s0.label}>Native API Secret (optional)</div>
+          <SelfControlledInput
+            name="singBoxSecret"
+            type="password"
+            value={singBoxConfig?.secret || ''}
+            placeholder=""
+            onBlur={handleSingBoxSecretBlur}
+          />
+        </div>
       </div>
     </div>
   );

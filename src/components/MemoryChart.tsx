@@ -13,11 +13,12 @@ import {
 import { getSelectedChartStyleIndex } from '../store/app';
 import { connect } from './StateProvider';
 
-const { useMemo, useState, useEffect } = React;
+const { useMemo } = React;
 
 const chartWrapperStyle = {
   position: 'relative' as const,
   maxWidth: 1000,
+  marginTop: '1em',
 };
 
 const mapState = (s: State) => ({
@@ -35,13 +36,6 @@ function MemoryChart({
   const { t } = useTranslation();
 
   const memorySource = singBoxClient.memoryChartSource;
-  const [hasData, setHasData] = useState(() => memorySource.inuse.length > 0);
-  useEffect(() => {
-    return memorySource.subscribe(() => {
-      setHasData(memorySource.inuse.length > 0);
-    });
-  }, [memorySource]);
-
   const styleIdx = (selectedChartStyleIndex || 0) % chartStyles.length;
   const data = useMemo(
     () => ({
@@ -50,7 +44,7 @@ function MemoryChart({
         {
           ...commonDataSetProps,
           ...chartStyles[styleIdx].inuse,
-          label: t('Memory') + ' (sing-box Service API)',
+          label: t('Memory'),
           data: memorySource.inuse,
         },
       ],
@@ -63,22 +57,6 @@ function MemoryChart({
   return (
     <div style={chartWrapperStyle}>
       <canvas id="MemoryChart" />
-      {!hasData && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            opacity: 0.6,
-            fontSize: '0.88em',
-            pointerEvents: 'none',
-            textAlign: 'center',
-          }}
-        >
-          {t('waiting_for_telemetry') || 'Waiting for telemetry...'}
-        </div>
-      )}
     </div>
   );
 }

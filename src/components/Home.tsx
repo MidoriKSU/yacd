@@ -14,7 +14,9 @@ export default function Home() {
     <div>
       <ContentHeader title={t('Overview')} />
       <div className={s0.root}>
-        <TrafficNow />
+        <div>
+          <TrafficNow />
+        </div>
         <div className={s0.chart}>
           <Suspense fallback={<Loading height="200px" />}>
             <TrafficChart />
