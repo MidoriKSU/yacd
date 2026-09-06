@@ -52,7 +52,8 @@ function getTargetAddressSpace(urlStr: string): 'loopback' | 'local' | undefined
   return undefined;
 }
 
-export function getURLAndInit({ baseURL, secret }: ClashAPIConfig) {
+export function getURLAndInit(apiConfig?: ClashAPIConfig) {
+  const { baseURL = '', secret = '' } = apiConfig || {};
   const headers = genCommonHeaders({ secret });
   const targetSpace = baseURL ? getTargetAddressSpace(baseURL) : undefined;
   const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
@@ -65,7 +66,8 @@ export function getURLAndInit({ baseURL, secret }: ClashAPIConfig) {
   };
 }
 
-export function buildWebSocketURL(apiConfig: ClashAPIConfig, endpoint: string) {
+export function buildWebSocketURL(apiConfig: ClashAPIConfig | undefined, endpoint: string) {
+  if (!apiConfig || !apiConfig.baseURL) return '';
   const { baseURL, secret } = apiConfig;
   const params = new URLSearchParams({
     token: secret,
@@ -74,7 +76,8 @@ export function buildWebSocketURL(apiConfig: ClashAPIConfig, endpoint: string) {
   return buildWebSocketURLBase(baseURL, params, endpoint);
 }
 
-export function buildLogsWebSocketURL(apiConfig: LogsAPIConfig, endpoint: string) {
+export function buildLogsWebSocketURL(apiConfig: LogsAPIConfig | undefined, endpoint: string) {
+  if (!apiConfig || !apiConfig.baseURL) return '';
   const { baseURL, secret, logLevel } = apiConfig;
   const params = new URLSearchParams({
     token: secret,

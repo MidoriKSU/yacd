@@ -32,9 +32,12 @@ function normalizeAPIResponse(data: RuleProviderAPIData) {
 }
 
 export async function fetchRuleProviders(endpoint: string, apiConfig: ClashAPIConfig) {
+  let data = { providers: {} };
+  if (!apiConfig || !apiConfig.baseURL) {
+    return normalizeAPIResponse(data);
+  }
   const { url, init } = getURLAndInit(apiConfig);
 
-  let data = { providers: {} };
   try {
     const res = await fetch(url + endpoint, init);
     if (res.ok) {

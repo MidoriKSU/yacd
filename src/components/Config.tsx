@@ -83,10 +83,12 @@ function ConfigContainer({
 }: {
   dispatch: DispatchFn;
   configs: ClashGeneralConfig;
-  apiConfig: ClashAPIConfig;
+  apiConfig?: ClashAPIConfig;
 }) {
   useEffect(() => {
-    dispatch(fetchConfigs(apiConfig));
+    if (apiConfig?.baseURL) {
+      dispatch(fetchConfigs(apiConfig));
+    }
   }, [dispatch, apiConfig]);
   return <Config configs={configs} />;
 }
@@ -96,7 +98,7 @@ type ConfigImplProps = {
   configs: ClashGeneralConfig;
   selectedChartStyleIndex: number;
   latencyTestUrl: string;
-  apiConfig: ClashAPIConfig;
+  apiConfig?: ClashAPIConfig;
   singBoxConfig: SingBoxConfig;
   nativeAPIConfig?: NativeAPIConfig;
 };
@@ -146,7 +148,9 @@ function ConfigImpl({
       const name = 'allow-lan';
       const value = checked;
       setConfigState(name, value);
-      dispatch(updateConfigs(apiConfig, { 'allow-lan': value }));
+      if (apiConfig?.baseURL) {
+        dispatch(updateConfigs(apiConfig, { 'allow-lan': value }));
+      }
     },
     [apiConfig, dispatch, setConfigState],
   );
@@ -157,9 +161,11 @@ function ConfigImpl({
         case 'mode':
         case 'log-level':
           setConfigState(name, value);
-          dispatch(updateConfigs(apiConfig, { [name]: value }));
-          if (name === 'log-level') {
-            logsApi.reconnect({ ...apiConfig, logLevel: value });
+          if (apiConfig?.baseURL) {
+            dispatch(updateConfigs(apiConfig, { [name]: value }));
+            if (name === 'log-level') {
+              logsApi.reconnect({ ...apiConfig, logLevel: value });
+            }
           }
           break;
         case 'tproxy-port':
@@ -199,7 +205,9 @@ function ConfigImpl({
         case 'tproxy-port': {
           const num = parseInt(value, 10);
           if (num < 0 || num > 65535) return;
-          dispatch(updateConfigs(apiConfig, { [name]: num }));
+          if (apiConfig?.baseURL) {
+            dispatch(updateConfigs(apiConfig, { [name]: num }));
+          }
           break;
         }
         case 'latencyTestUrl': {
@@ -214,21 +222,27 @@ function ConfigImpl({
   );
 
   const handleReloadConfigs = useCallback(() => {
-    dispatch(reloadConfigs(apiConfig));
+    if (apiConfig?.baseURL) {
+      dispatch(reloadConfigs(apiConfig));
+    }
   },[apiConfig, dispatch]);
 
   const handleFlushFakeIPPool = useCallback(() => {
-    dispatch(flushFakeIPPool(apiConfig));
+    if (apiConfig?.baseURL) {
+      dispatch(flushFakeIPPool(apiConfig));
+    }
   },[apiConfig, dispatch]);
 
   const handleUpdateGeoDatabasesFile = useCallback(() => {
-    dispatch(updateGeoDatabasesFile(apiConfig));
+    if (apiConfig?.baseURL) {
+      dispatch(updateGeoDatabasesFile(apiConfig));
+    }
   }, [apiConfig, dispatch]);
 
   const mode = useMemo(() => {
-    const m = configState.mode;
-    return typeof m === 'string' && m[0].toUpperCase() + m.slice(1);
-  }, [configState.mode]);
+    const m = configState?.mode;
+    return typeof m === 'string' && m.length > 0 ? m[0].toUpperCase() + m.slice(1) : 'Rule';
+  }, [configState?.mode]);
 
   const [pureBlack, setPureBlack] = useAtom(darkModePureBlackToggleAtom);
 
@@ -244,6 +258,8 @@ function ConfigImpl({
     }
   );
 
+  const isSingBoxClash = Boolean(version?.meta && version?.premium);
+
   const modeOptions = useMemo(() => {
     return configState["mode-list"] || configState.modes || ['Global', 'Rule', 'Direct'];
   }, [configState["mode-list"], configState.modes]);
@@ -252,7 +268,7 @@ function ConfigImpl({
     <div>
       <ContentHeader title={t('Config')} />
       <div className={s0.root}>
-        {(version?.meta && version?.premium) ||
+        {isSingBoxClash ||
           portFields.map((f) =>
             configState[f.key] !== undefined ? (
               <div key={f.key}>
@@ -271,7 +287,7 @@ function ConfigImpl({
           <div className={s0.label}>Mode</div>
           <Select
             options={modeOptions.map((mode) => [mode, mode])}
-            selected={modeOptions.find(m => m.toLowerCase() === mode.toLowerCase()) || mode}
+            selected={modeOptions.find(m => typeof m === 'string' && m.toLowerCase() === mode.toLowerCase()) || mode}
             onChange={(e) => handleChangeValue({ name: 'mode', value: e.target.value })}
           />
         </div>
@@ -285,7 +301,7 @@ function ConfigImpl({
           />
         </div>
 
-        {(version.meta && version.premium) || (
+        {isSingBoxClash || (
           <div>
           <div className={s0.item}>
             <ToggleInput
@@ -320,7 +336,7 @@ function ConfigImpl({
               onClick={handleFlushFakeIPPool}
           />
         </div>
-        {(version.meta && version.premium) || (
+        {isSingBoxClash || (
         <div>
           <div className={s0.label}>GEO Databases</div>
           <Button

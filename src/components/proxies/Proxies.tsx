@@ -41,12 +41,13 @@ function Proxies({
   groupNames: string[];
   delay: DelayMapping;
   proxyProviders: FormattedProxyProvider[];
-  apiConfig: ClashAPIConfig;
+  apiConfig?: ClashAPIConfig;
   showModalClosePrevConns: boolean;
 }) {
   const refFetchedTimestamp = useRef<{ startAt?: number; completeAt?: number }>({});
 
   const fetchProxiesHooked = useCallback(() => {
+    if (!apiConfig?.baseURL) return;
     refFetchedTimestamp.current.startAt = Date.now();
     dispatch(fetchProxies(apiConfig))
       .then(() => {

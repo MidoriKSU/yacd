@@ -54,19 +54,19 @@ export function useInvalidateQueries() {
   }, [queryClient]);
 }
 
-export function useRuleProviderQuery(apiConfig: ClashAPIConfig) {
+export function useRuleProviderQuery(apiConfig?: ClashAPIConfig) {
   return useQuery(
     ['/providers/rules', apiConfig],
     () => fetchRuleProviders('/providers/rules', apiConfig),
-    { suspense: true, retry: 1 },
+    { suspense: true, retry: 1, enabled: Boolean(apiConfig?.baseURL) },
   );
 }
 
-export function useRuleAndProvider(apiConfig: ClashAPIConfig) {
+export function useRuleAndProvider(apiConfig?: ClashAPIConfig) {
   const { data: rawRules, isFetching } = useQuery(
     ['/rules', apiConfig],
     () => fetchRules('/rules', apiConfig),
-    { suspense: true, retry: 1 },
+    { suspense: true, retry: 1, enabled: Boolean(apiConfig?.baseURL) },
   );
   const { data: rawProvider } = useRuleProviderQuery(apiConfig);
 

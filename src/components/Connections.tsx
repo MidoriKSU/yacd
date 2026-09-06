@@ -145,7 +145,7 @@ function connQty({ qty }) {
   return qty < 100 ? '' + qty : '99+';
 }
 
-function Conn({ apiConfig }: { apiConfig: ClashAPIConfig }) {
+function Conn({ apiConfig }: { apiConfig?: ClashAPIConfig }) {
   const [refContainer, containerHeight] = useRemainingViewPortHeight();
 
   const [conns, setConns] = useState([]);
@@ -166,7 +166,9 @@ function Conn({ apiConfig }: { apiConfig: ClashAPIConfig }) {
   const [isRefreshPaused, setIsRefreshPaused] = useState(false);
   const toggleIsRefreshPaused = useCallback(() => setIsRefreshPaused((x) => !x), []);
   const closeAllConnections = useCallback(() => {
-    connAPI.closeAllConnections(apiConfig);
+    if (apiConfig?.baseURL) {
+      connAPI.closeAllConnections(apiConfig);
+    }
     closeCloseAllModal();
   }, [apiConfig, closeCloseAllModal]);
   const prevConnsRef = useRef(conns);
@@ -200,6 +202,7 @@ function Conn({ apiConfig }: { apiConfig: ClashAPIConfig }) {
   );
 
   useEffect(() => {
+    if (!apiConfig?.baseURL) return;
     return connAPI.fetchData(apiConfig, read);
   }, [apiConfig, read]);
 

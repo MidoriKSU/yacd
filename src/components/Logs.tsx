@@ -71,12 +71,13 @@ function Logs({
 }: {
   dispatch: DispatchFn;
   logLevel: string;
-  apiConfig: ClashAPIConfig;
+  apiConfig?: ClashAPIConfig;
   logs: Log[];
   logStreamingPaused: boolean;
 }) {
   const actions = useStoreActions();
   const toggleIsRefreshPaused = useCallback(() => {
+    if (!apiConfig?.baseURL) return;
     logStreamingPaused ? reconnectLogs({ ...apiConfig, logLevel }) : stopLogs();
     // being lazy here
     // ideally we should check the result of previous operation before updating this
@@ -84,6 +85,7 @@ function Logs({
   }, [apiConfig, logLevel, logStreamingPaused, actions.app]);
   const appendLogInternal = useCallback((log: Log) => dispatch(appendLog(log)), [dispatch]);
   useEffect(() => {
+    if (!apiConfig?.baseURL) return;
     fetchLogs({ ...apiConfig, logLevel }, appendLogInternal);
   }, [apiConfig, logLevel, appendLogInternal]);
   const [refLogsContainer, containerHeight] = useRemainingViewPortHeight();

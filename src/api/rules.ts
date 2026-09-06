@@ -24,6 +24,9 @@ function normalizeAPIResponse(json: { rules: Array<RuleAPIItem> }): Array<RuleIt
 
 export async function fetchRules(endpoint: string, apiConfig: ClashAPIConfig) {
   let json = { rules: [] };
+  if (!apiConfig || !apiConfig.baseURL) {
+    return normalizeAPIResponse(json);
+  }
   try {
     const { url, init } = getURLAndInit(apiConfig);
     const res = await fetch(url + endpoint, init);

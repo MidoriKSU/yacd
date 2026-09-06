@@ -66,8 +66,9 @@ function mapLatency(names: string[], getProxy: (name: string) => { history: Late
   return result;
 }
 
-export function fetchProxies(apiConfig: ClashAPIConfig) {
+export function fetchProxies(apiConfig?: ClashAPIConfig) {
   return async (dispatch: any, getState: any) => {
+    if (!apiConfig || !apiConfig.baseURL) return;
     const { meta, premium } = await fetchVersion('/version', apiConfig);
 
     const [proxiesData, providersData] = await Promise.all([
