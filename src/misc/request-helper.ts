@@ -1,6 +1,6 @@
-import { trimTrailingSlash } from 'src/misc/utils';
-import { ClashAPIConfig } from 'src/types';
-import { LogsAPIConfig } from 'src/types';
+import type { ClashAPIConfig, LogsAPIConfig } from '../types';
+
+const trimTrailingSlash = (s: string) => s.replace(/\/$/, '');
 
 const headersCommon = { 'Content-Type': 'application/json' };
 
@@ -23,11 +23,45 @@ function buildWebSocketURLBase(baseURL: string, params: URLSearchParams, endpoin
   }
 }
 
+function getTargetAddressSpace(urlStr: string): 'loopback' | 'local' | undefined {
+  if (!urlStr) return undefined;
+  try {
+    const parsed = new URL(urlStr.startsWith('http') ? urlStr : `http://${urlStr}`);
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host === '0:0:0:0:0:0:0:1' ||
+      host.startsWith('127.') ||
+      host.endsWith('.localhost')
+    ) {
+      return 'loopback';
+    }
+    if (
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
+      host.endsWith('.local')
+    ) {
+      return 'local';
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 export function getURLAndInit({ baseURL, secret }: ClashAPIConfig) {
   const headers = genCommonHeaders({ secret });
+  const targetSpace = baseURL ? getTargetAddressSpace(baseURL) : undefined;
+  const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
   return {
     url: baseURL,
-    init: { headers },
+    init: {
+      headers,
+      ...(isHttps && targetSpace ? { targetAddressSpace: targetSpace } : {}),
+    } as RequestInit,
   };
 }
 

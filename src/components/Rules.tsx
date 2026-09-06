@@ -28,18 +28,18 @@ type ItemData = {
 };
 
 function itemKey(index: number, { rules, provider }: ItemData) {
-  const providerQty = provider.names.length;
+  const providerQty = provider?.names?.length || 0;
 
   if (index < providerQty) {
     return provider.names[index];
   }
-  const item = rules[index - providerQty];
-  return item.id;
+  const item = rules ? rules[index - providerQty] : undefined;
+  return item?.id ?? index;
 }
 
-function getItemSizeFactory({ provider }) {
+function getItemSizeFactory({ provider }: { provider?: any }) {
   return function getItemSize(idx: number) {
-    const providerQty = provider.names.length;
+    const providerQty = provider?.names?.length || 0;
     if (idx < providerQty) {
       // provider
       return 110;

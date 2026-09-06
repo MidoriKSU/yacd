@@ -114,7 +114,18 @@ function SingBoxConfigSectionImpl({
 
   const handleCopyClash = () => {
     if (clashAPIConfig?.baseURL) {
-      setEndpoint(clashAPIConfig.baseURL);
+      try {
+        const raw = clashAPIConfig.baseURL.trim();
+        const fullUrl = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw) ? raw : `http://${raw}`;
+        const parsed = new URL(fullUrl);
+        const protocol = parsed.protocol || 'http:';
+        const hostname = parsed.hostname;
+        // Service API default port is 9080; never copy Clash port 9090
+        const port = (!parsed.port || parsed.port === '9090') ? '9080' : parsed.port;
+        setEndpoint(`${protocol}//${hostname}:${port}`);
+      } catch {
+        setEndpoint(clashAPIConfig.baseURL);
+      }
     }
     if (clashAPIConfig?.secret) {
       setSecret(clashAPIConfig.secret);

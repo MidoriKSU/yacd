@@ -393,6 +393,19 @@ function buildSubscribeStatusPayload(): Uint8Array {
   return frame;
 }
 
+// Build 6-byte framed SubscribeStatusRequest protobuf message for grpc-websockets:
+// byte 0: 0x00 (improbable-eng websocket DATA signal)
+// byte 1: 0x00 (gRPC-Web flag: uncompressed data)
+// bytes 2..5: 4-byte big-endian length of protobuf payload
+// bytes 6..: protobuf payload
+export function buildSubscribeStatusWsPayload(): Uint8Array {
+  const grpcFrame = buildSubscribeStatusPayload();
+  const wsFrame = new Uint8Array(1 + grpcFrame.length);
+  wsFrame[0] = 0x00; // WebSocket DATA frame signal
+  wsFrame.set(grpcFrame, 1);
+  return wsFrame;
+}
+
 export interface TrafficChartSource {
   labels: string[];
   up: number[];
@@ -549,6 +562,214 @@ export class SingBoxClient {
         console.error('singbox listener error:', err);
       }
     }
+  }
+
+  private async testConnectionWebSocket(
+    url: string,
+    secret: string,
+    timeoutMs = 5000
+  ): Promise<{
+    ok: boolean;
+    resultState: SingBoxResultState;
+    message: string;
+    latency?: number;
+  }> {
+    return new Promise((resolve) => {
+      if (typeof WebSocket === 'undefined') {
+        resolve({
+          ok: false,
+          resultState: 'Transport Error',
+          message: 'WebSocket not supported in this environment',
+        });
+        return;
+      }
+
+      const start = performance.now();
+      const wsUrl =
+        url.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:') +
+        '/daemon.StartedService/GetStartedAt';
+
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let finished = false;
+      let ws: WebSocket;
+
+      const cleanup = () => {
+        finished = true;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
+      };
+
+      const done = (result: {
+        ok: boolean;
+        resultState: SingBoxResultState;
+        message: string;
+        latency?: number;
+      }) => {
+        if (finished) return;
+        cleanup();
+        resolve(result);
+      };
+
+      timer = setTimeout(() => {
+        done({
+          ok: false,
+          resultState: 'Unreachable',
+          message: 'Unreachable: Connection timed out (5s)',
+          latency: Math.round(performance.now() - start),
+        });
+      }, timeoutMs);
+
+      try {
+        ws = new WebSocket(wsUrl, ['grpc-websockets']);
+        ws.binaryType = 'arraybuffer';
+      } catch (err: any) {
+        const elapsed = Math.round(performance.now() - start);
+        const classified = classifyRequestError(err);
+        done({
+          ok: false,
+          resultState: classified.resultState,
+          message: classified.message,
+          latency: elapsed,
+        });
+        return;
+      }
+
+      let buffer = new Uint8Array(0);
+      let hasData = false;
+      let startedAt: number | null = null;
+
+      ws.onopen = () => {
+        try {
+          let headers =
+            'content-type: application/grpc-web+proto\r\nx-grpc-web: 1\r\n';
+          if (secret) {
+            headers += `authorization: Bearer ${secret}\r\n`;
+          }
+          headers += '\r\n';
+          ws.send(new TextEncoder().encode(headers));
+
+          // 6 bytes: 0x00 (ws signal) + 5 bytes gRPC empty frame [0x00, 0x00, 0x00, 0x00, 0x00]
+          const emptyFrame = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+          ws.send(emptyFrame);
+          ws.send(new Uint8Array([1]));
+        } catch (err: any) {
+          const elapsed = Math.round(performance.now() - start);
+          done({
+            ok: false,
+            resultState: 'Transport Error',
+            message: err?.message || 'Failed to send WebSocket probe',
+            latency: elapsed,
+          });
+        }
+      };
+
+      ws.onmessage = (evt) => {
+        const elapsed = Math.round(performance.now() - start);
+        const chunk = new Uint8Array(evt.data as ArrayBuffer);
+        const merged = new Uint8Array(buffer.length + chunk.length);
+        merged.set(buffer);
+        merged.set(chunk, buffer.length);
+        buffer = merged;
+
+        while (buffer.length >= 5) {
+          const flag = buffer[0];
+          const len =
+            ((buffer[1] << 24) |
+              (buffer[2] << 16) |
+              (buffer[3] << 8) |
+              buffer[4]) >>> 0;
+          if (buffer.length < 5 + len) break;
+
+          const body = buffer.slice(5, 5 + len);
+          buffer = buffer.slice(5 + len);
+
+          if ((flag & 0x80) !== 0) {
+            const trailerText = new TextDecoder().decode(body);
+            const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
+            if (grpcStatus && grpcStatus !== '0') {
+              if (grpcStatus === '16' || grpcStatus === '7') {
+                done({
+                  ok: false,
+                  resultState: 'Authentication Failed',
+                  message: `Authentication Failed: ${grpcMessage || 'secret invalid'}`,
+                  latency: elapsed,
+                });
+                return;
+              }
+              done({
+                ok: false,
+                resultState: 'Transport Error',
+                message: `Transport Error (gRPC ${grpcStatus}): ${grpcMessage || 'RPC failed'}`,
+                latency: elapsed,
+              });
+              return;
+            }
+          } else {
+            hasData = true;
+            startedAt = decodeStartedAt(body);
+          }
+        }
+
+        if (hasData) {
+          done({
+            ok: true,
+            resultState: 'Connected',
+            message: startedAt
+              ? `Connected (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
+              : `Connected (${elapsed}ms)`,
+            latency: elapsed,
+          });
+        }
+      };
+
+      ws.onerror = (evt: any) => {
+        const elapsed = Math.round(performance.now() - start);
+        const classified = classifyRequestError(evt?.error || evt);
+        done({
+          ok: false,
+          resultState: classified.resultState,
+          message: classified.message,
+          latency: elapsed,
+        });
+      };
+
+      ws.onclose = (evt) => {
+        const elapsed = Math.round(performance.now() - start);
+        if (hasData) {
+          done({
+            ok: true,
+            resultState: 'Connected',
+            message: startedAt
+              ? `Connected (Uptime: ${formatUptime(startedAt)}, ${elapsed}ms)`
+              : `Connected (${elapsed}ms)`,
+            latency: elapsed,
+          });
+        } else {
+          if (evt.code === 4001 || evt.code === 4003 || evt.code === 4016) {
+            done({
+              ok: false,
+              resultState: 'Authentication Failed',
+              message: `Authentication Failed (${evt.code}): ${evt.reason || 'secret invalid'}`,
+              latency: elapsed,
+            });
+          } else {
+            done({
+              ok: false,
+              resultState: 'Unreachable',
+              message: evt.reason ? `Connection closed: ${evt.reason}` : 'Connection closed without response',
+              latency: elapsed,
+            });
+          }
+        }
+      };
+    });
   }
 
   public async testConnection(
@@ -711,6 +932,16 @@ export class SingBoxClient {
         latency: elapsed,
       };
     } catch (err: any) {
+      if (typeof window !== 'undefined' && typeof WebSocket !== 'undefined') {
+        try {
+          const wsRes = await this.testConnectionWebSocket(url, secret);
+          if (wsRes.ok || wsRes.resultState === 'Authentication Failed') {
+            return wsRes;
+          }
+        } catch {
+          // ignore
+        }
+      }
       const elapsed = Math.round(performance.now() - start);
       const classified = classifyRequestError(err);
       return {
@@ -775,13 +1006,126 @@ export class SingBoxClient {
     this.error = undefined;
     this.notify();
 
-    // Stream status over gRPC-Web HTTP streaming
-    this.connectHttpStream(targetUrl);
+    // Prefer WebSocket with grpc-websockets subprotocol for browser compatibility
+    if (typeof WebSocket !== 'undefined') {
+      this.connectWebSocket(targetUrl);
+    } else {
+      this.connectHttpStream(targetUrl);
+    }
     // Fetch StartedAt timestamp concurrently
     this.fetchStartedAt(targetUrl);
   }
 
+  private connectWebSocket(baseUrl: string) {
+    try {
+      const wsUrl =
+        baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:') +
+        '/daemon.StartedService/SubscribeStatus';
+      const ws = new WebSocket(wsUrl, ['grpc-websockets']);
+      this.ws = ws;
+      ws.binaryType = 'arraybuffer';
+
+      let buffer = new Uint8Array(0);
+
+      ws.onopen = () => {
+        let headers =
+          'content-type: application/grpc-web+proto\r\nx-grpc-web: 1\r\naccept-language: en\r\n';
+        const secret = this.effectiveSecret();
+        if (secret) {
+          headers += `authorization: Bearer ${secret}\r\n`;
+        }
+        headers += '\r\n';
+        ws.send(new TextEncoder().encode(headers));
+
+        const reqPayload = buildSubscribeStatusWsPayload();
+        ws.send(reqPayload);
+        ws.send(new Uint8Array([1]));
+      };
+
+      ws.onmessage = (evt) => {
+        const chunk = new Uint8Array(evt.data as ArrayBuffer);
+        const merged = new Uint8Array(buffer.length + chunk.length);
+        merged.set(buffer);
+        merged.set(chunk, buffer.length);
+        buffer = merged;
+
+        while (buffer.length >= 5) {
+          const flag = buffer[0];
+          const len =
+            ((buffer[1] << 24) | (buffer[2] << 16) | (buffer[3] << 8) | buffer[4]) >>> 0;
+          if (buffer.length < 5 + len) break;
+
+          const body = buffer.slice(5, 5 + len);
+          buffer = buffer.slice(5 + len);
+
+          if ((flag & 0x80) !== 0) {
+            // Trailer frame
+            const trailerText = new TextDecoder().decode(body);
+            const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
+            if (grpcStatus && grpcStatus !== '0') {
+              if (grpcStatus === '16' || grpcStatus === '7') {
+                this.phase = 'error';
+                this.resultState = 'Authentication Failed';
+                this.error = `Authentication Failed: ${grpcMessage || 'secret invalid'}`;
+              } else {
+                this.phase = 'error';
+                this.resultState = 'Transport Error';
+                this.error = `gRPC Error (${grpcStatus}): ${grpcMessage || 'stream failed'}`;
+              }
+              this.notify();
+              this.scheduleReconnect();
+              return;
+            }
+          } else {
+            // Valid telemetry data frame!
+            try {
+              const status = decodeStatus(body);
+              this.phase = 'connected';
+              this.resultState = 'Connected';
+              this.error = undefined;
+              this.onNewStatus(status);
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.warn('singbox status decode error', err);
+            }
+          }
+        }
+      };
+
+      ws.onerror = () => {
+        if (this.phase === 'connecting') {
+          // Fall back to HTTP stream if WebSocket fails
+          this.ws = null;
+          this.connectHttpStream(baseUrl);
+        }
+      };
+
+      ws.onclose = (evt) => {
+        if (this.ws === ws) {
+          this.ws = null;
+          if (this.phase === 'connected') {
+            this.phase = 'disconnected';
+          } else {
+            this.phase = 'error';
+            if (evt.code === 4001 || evt.code === 4003 || evt.code === 4016) {
+              this.resultState = 'Authentication Failed';
+              this.error = `Authentication Failed (${evt.code}): ${evt.reason || 'secret invalid'}`;
+            } else {
+              this.resultState = this.resultState || 'Transport Error';
+              this.error = this.error || (evt.reason ? `Connection closed: ${evt.reason}` : 'Connection closed');
+            }
+          }
+          this.notify();
+          this.scheduleReconnect();
+        }
+      };
+    } catch {
+      this.connectHttpStream(baseUrl);
+    }
+  }
+
   private async connectHttpStream(baseUrl: string) {
+    if (this.ws) return;
     const controller = new AbortController();
     this.abortController = controller;
     const connectTimer = setTimeout(() => {

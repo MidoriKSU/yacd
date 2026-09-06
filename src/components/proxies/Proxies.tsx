@@ -48,9 +48,14 @@ function Proxies({
 
   const fetchProxiesHooked = useCallback(() => {
     refFetchedTimestamp.current.startAt = Date.now();
-    dispatch(fetchProxies(apiConfig)).then(() => {
-      refFetchedTimestamp.current.completeAt = Date.now();
-    });
+    dispatch(fetchProxies(apiConfig))
+      .then(() => {
+        refFetchedTimestamp.current.completeAt = Date.now();
+      })
+      .catch((err) => {
+        // Defensive: prevent unhandled rejection if Clash API is unreachable or fails
+        console.warn('Failed to fetch proxies:', err);
+      });
   }, [apiConfig, dispatch]);
   useEffect(() => {
     // fetch it now

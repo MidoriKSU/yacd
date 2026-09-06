@@ -68,11 +68,12 @@ function APIConfig({
   }, []);
 
   const onConfirm = useCallback(() => {
-    verify({ baseURL, secret }).then((ret) => {
+    const normalized = normalizeClashURL(baseURL);
+    verify({ baseURL: normalized, secret }).then((ret) => {
       if (ret[0] !== Ok) {
         setErrMsg(ret[1]);
       } else {
-        dispatch(addClashAPIConfig({ baseURL, secret, metaLabel }));
+        dispatch(addClashAPIConfig({ baseURL: normalized, secret, metaLabel }));
       }
     });
   }, [baseURL, secret, metaLabel, dispatch]);
@@ -200,21 +201,24 @@ function APIConfig({
 
 export default connect(mapState)(APIConfig);
 
-async function verify(apiConfig: ClashAPIConfig): Promise<[number, string?]> {
-  try {
-    new URL(apiConfig.baseURL);
-  } catch (e) {
-    if (apiConfig.baseURL) {
-      const prefix = apiConfig.baseURL.substring(0, 7);
-      if (prefix !== 'http://' && prefix !== 'https:/') {
-        return [1, 'Must start with http:// or https://'];
-      }
-    }
+function normalizeClashURL(raw: string): string {
+  const trimmed = (raw || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
+    return trimmed;
+  }
+  return `http://${trimmed}`;
+}
 
+async function verify(apiConfig: ClashAPIConfig): Promise<[number, string?]> {
+  const normalizedBaseURL = normalizeClashURL(apiConfig.baseURL);
+  try {
+    new URL(normalizedBaseURL);
+  } catch (e) {
     return [1, 'Invalid URL'];
   }
   try {
-    const res = await fetchConfigs(apiConfig);
+    const res = await fetchConfigs({ ...apiConfig, baseURL: normalizedBaseURL });
     if (res.status > 399) {
       return [1, res.statusText];
     }

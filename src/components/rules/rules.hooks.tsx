@@ -63,12 +63,15 @@ export function useRuleProviderQuery(apiConfig: ClashAPIConfig) {
 }
 
 export function useRuleAndProvider(apiConfig: ClashAPIConfig) {
-  const { data: rules, isFetching } = useQuery(
+  const { data: rawRules, isFetching } = useQuery(
     ['/rules', apiConfig],
     () => fetchRules('/rules', apiConfig),
     { suspense: true, retry: 1 },
   );
-  const { data: provider } = useRuleProviderQuery(apiConfig);
+  const { data: rawProvider } = useRuleProviderQuery(apiConfig);
+
+  const rules = rawRules || [];
+  const provider = rawProvider || { names: [], byName: {} };
 
   const [filterText] = useAtom(ruleFilterTextAtom);
   if (filterText === '') {
@@ -76,11 +79,11 @@ export function useRuleAndProvider(apiConfig: ClashAPIConfig) {
   } else {
     const f = filterText.toLowerCase();
     return {
-      rules: rules.filter((r) => r.payload.toLowerCase().indexOf(f) >= 0),
+      rules: rules.filter((r) => r.payload && r.payload.toLowerCase().indexOf(f) >= 0),
       isFetching,
       provider: {
-        byName: provider.byName,
-        names: provider.names.filter((t) => t.toLowerCase().indexOf(f) >= 0),
+        byName: provider.byName || {},
+        names: (provider.names || []).filter((t) => t.toLowerCase().indexOf(f) >= 0),
       },
     };
   }
