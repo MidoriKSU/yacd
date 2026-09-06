@@ -1,11 +1,15 @@
-import type { ClashAPIConfig } from 'src/types';
+import type { ClashAPIConfig, NativeAPIConfig } from 'src/types';
 
 import type { SingBoxConfig } from '$src/api/singbox';
 
 export type ClashAPIConfigWithAddedAt = ClashAPIConfig & { addedAt?: number };
+export type NativeAPIConfigWithAddedAt = NativeAPIConfig & { addedAt?: number };
+
 export type StateApp = {
   selectedClashAPIConfigIndex: number;
   clashAPIConfigs: ClashAPIConfigWithAddedAt[];
+  selectedNativeAPIConfigIndex: number;
+  nativeAPIConfigs: NativeAPIConfigWithAddedAt[];
   singBoxConfig?: SingBoxConfig;
 
   latencyTestUrl: string;

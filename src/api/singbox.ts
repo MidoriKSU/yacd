@@ -120,6 +120,41 @@ export function validateEndpoint(raw: string): EndpointValidationResult {
     isPrivate,
   };
 }
+
+export async function testNativeConnection(
+  targetUrl: string,
+  secret?: string,
+): Promise<{
+  ok: boolean;
+  version?: string;
+  apiVersion?: number;
+  error?: string;
+}> {
+  const normalized = normalizeEndpoint(targetUrl);
+  if (!normalized) {
+    return { ok: false, error: 'Endpoint is not configured' };
+  }
+  try {
+    const transport = createGrpcWebTransport({
+      baseUrl: normalized,
+      interceptors: [
+        (next) => (request) => {
+          request.header.set('Accept-Language', 'en');
+          if (secret) {
+            request.header.set('Authorization', `Bearer ${secret}`);
+          }
+          return next(request);
+        },
+      ],
+    });
+    const client = createClient(StartedService, transport);
+    const res = await client.getVersion({});
+    return { ok: true, version: res.version, apiVersion: res.apiVersion };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Connection failed' };
+  }
+}
+
 const STORAGE_CONFIG_KEY = 'yacd.singbox.config';
 const CHART_SIZE = 150;
 
@@ -277,30 +312,7 @@ export class SingBoxClient {
     apiVersion?: number;
     error?: string;
   }> {
-    const targetUrl = this.endpoint;
-    if (!targetUrl) {
-      return { ok: false, error: 'Endpoint is not configured' };
-    }
-    try {
-      const secret = this.effectiveSecret();
-      const transport = createGrpcWebTransport({
-        baseUrl: targetUrl,
-        interceptors: [
-          (next) => (request) => {
-            request.header.set('Accept-Language', 'en');
-            if (secret) {
-              request.header.set('Authorization', `Bearer ${secret}`);
-            }
-            return next(request);
-          },
-        ],
-      });
-      const client = createClient(StartedService, transport);
-      const res = await client.getVersion({});
-      return { ok: true, version: res.version, apiVersion: res.apiVersion };
-    } catch (err: any) {
-      return { ok: false, error: err?.message || 'Connection failed' };
-    }
+    return testNativeConnection(this.endpoint, this.effectiveSecret());
   }
 
   private async startConnection() {

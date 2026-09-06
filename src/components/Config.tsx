@@ -8,20 +8,21 @@ import {
   Trash2,
 } from 'react-feather';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import * as logsApi from 'src/api/logs';
 import { SingBoxConfig } from 'src/api/singbox';
 import { fetchVersion } from 'src/api/version';
 import Select from 'src/components/shared/Select';
 import { ClashGeneralConfig, DispatchFn, State } from 'src/store/types';
-import { ClashAPIConfig } from 'src/types';
+import { ClashAPIConfig, NativeAPIConfig } from 'src/types';
 
 import {
   darkModePureBlackToggleAtom,
   getClashAPIConfig,
   getLatencyTestUrl,
+  getNativeAPIConfig,
   getSelectedChartStyleIndex,
   getSingBoxConfig,
-  updateSingBoxConfig,
 } from '../store/app';
 import { fetchConfigs, flushFakeIPPool, getConfigs, reloadConfigs, updateConfigs, updateGeoDatabasesFile } from '../store/configs';
 import { openModal } from '../store/modals';
@@ -69,6 +70,7 @@ const mapState2 = (s: State) => ({
   latencyTestUrl: getLatencyTestUrl(s),
   apiConfig: getClashAPIConfig(s),
   singBoxConfig: getSingBoxConfig(s),
+  nativeAPIConfig: getNativeAPIConfig(s),
 });
 
 const Config = connect(mapState2)(ConfigImpl);
@@ -96,6 +98,7 @@ type ConfigImplProps = {
   latencyTestUrl: string;
   apiConfig: ClashAPIConfig;
   singBoxConfig: SingBoxConfig;
+  nativeAPIConfig?: NativeAPIConfig;
 };
 
 function getBackendContent(version: any): string {
@@ -115,7 +118,9 @@ function ConfigImpl({
   latencyTestUrl,
   apiConfig,
   singBoxConfig,
+  nativeAPIConfig,
 }: ConfigImplProps) {
+  const navigate = useNavigate();
   const [configState, setConfigStateInternal] = useState(configs);
   const refConfigs = useRef(configs);
   useEffect(() => {
@@ -219,41 +224,6 @@ function ConfigImpl({
   const handleUpdateGeoDatabasesFile = useCallback(() => {
     dispatch(updateGeoDatabasesFile(apiConfig));
   }, [apiConfig, dispatch]);
-
-  const [isEditingNative, setIsEditingNative] = useState(false);
-
-  const handleSingBoxEndpointBlur = useCallback<React.FocusEventHandler<HTMLInputElement>>(
-    (e) => {
-      dispatch(updateSingBoxConfig({ endpoint: e.target.value.trim(), secret: singBoxConfig?.secret || '' }));
-    },
-    [dispatch, singBoxConfig],
-  );
-
-  const handleSingBoxSecretBlur = useCallback<React.FocusEventHandler<HTMLInputElement>>(
-    (e) => {
-      dispatch(updateSingBoxConfig({ endpoint: singBoxConfig?.endpoint || '', secret: e.target.value.trim() }));
-    },
-    [dispatch, singBoxConfig],
-  );
-
-  const handleConfirmSwitch = useCallback(() => {
-    const endpointEl = document.querySelector<HTMLInputElement>('input[name="singBoxEndpoint"]');
-    const secretEl = document.querySelector<HTMLInputElement>('input[name="singBoxSecret"]');
-    const endpoint = endpointEl ? endpointEl.value.trim() : (singBoxConfig?.endpoint || '');
-    const secret = secretEl ? secretEl.value.trim() : (singBoxConfig?.secret || '');
-    dispatch(updateSingBoxConfig({ endpoint, secret }));
-    setIsEditingNative(false);
-  }, [dispatch, singBoxConfig]);
-
-  const handleInputKeyDown = useCallback<React.KeyboardEventHandler<HTMLInputElement>>(
-    (e) => {
-      if (e.key === 'Enter') {
-        e.currentTarget.blur();
-        handleConfirmSwitch();
-      }
-    },
-    [handleConfirmSwitch],
-  );
 
   const mode = useMemo(() => {
     const m = configState.mode;
@@ -424,57 +394,28 @@ function ConfigImpl({
         <div />
       </div>
 
-      {!isEditingNative && Boolean(singBoxConfig?.endpoint) ? (
-        <div className={s0.section}>
-          <div>
-            <div className={s0.label}>
-              Native API
-              <p>{singBoxConfig.endpoint}</p>
-            </div>
-            <div className={s0.label}>Action</div>
-            <Button
-              start={<LogOut size={16} />}
-              label={t('switch_backend')}
-              onClick={() => setIsEditingNative(true)}
-            />
+      <div className={s0.section}>
+        <div>
+          <div className={s0.label}>
+            Native API
+            <p>
+              {nativeAPIConfig?.metaLabel ? (
+                <>
+                  <span>{nativeAPIConfig.metaLabel}</span>
+                  <br />
+                </>
+              ) : null}
+              {nativeAPIConfig?.baseURL || singBoxConfig?.endpoint || 'http://127.0.0.1:9080'}
+            </p>
           </div>
+          <div className={s0.label}>Action</div>
+          <Button
+            start={<LogOut size={16} />}
+            label={t('switch_backend')}
+            onClick={() => navigate('/backend-native')}
+          />
         </div>
-      ) : (
-        <div className={s0.nativeSection}>
-          <div className={s0.label1}>Native API Base URL</div>
-          <div className={s0.label2}>
-            Native API Secret <span className={s0.optional}>(optional)</span>
-          </div>
-          <div className={s0.control1}>
-            <SelfControlledInput
-              name="singBoxEndpoint"
-              type="text"
-              value={singBoxConfig?.endpoint || ''}
-              placeholder="http://127.0.0.1:9080"
-              onBlur={handleSingBoxEndpointBlur}
-              onKeyDown={handleInputKeyDown}
-            />
-          </div>
-          <div className={s0.control2}>
-            <SelfControlledInput
-              name="singBoxSecret"
-              type="password"
-              value={singBoxConfig?.secret || ''}
-              placeholder=""
-              onBlur={handleSingBoxSecretBlur}
-              onKeyDown={handleInputKeyDown}
-            />
-          </div>
-          <div className={s0.action}>
-            <div className={s0.label}>Action</div>
-            <Button
-              start={<LogOut size={16} />}
-              label={t('switch_backend')}
-              onClick={handleConfirmSwitch}
-            />
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

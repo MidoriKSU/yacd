@@ -20,6 +20,7 @@ import { MutableConnRefCtx } from './conns/ConnCtx';
 import ErrorBoundary from './ErrorBoundary';
 import Home from './Home';
 import Loading2 from './Loading2';
+import NativeAPIConfig from './NativeAPIConfig';
 import s0 from './Root.module.scss';
 import SideBar from './SideBar';
 import StateProvider from './StateProvider';
@@ -72,6 +73,7 @@ function SideBarApp() {
 function App() {
   return useRoutes([
     { path: '/backend', element: <APIConfig /> },
+    { path: '/backend-native', element: <NativeAPIConfig /> },
     { path: '*', element: <SideBarApp /> },
   ]);
 }

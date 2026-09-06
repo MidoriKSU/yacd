@@ -31,6 +31,10 @@
   background-color: var(--bg-near-transparent);
 }
 
+.li.isSelected {
+  border-color: var(--color-focus-blue);
+}
+
 .close {
   opacity: 0;
   place-self: center;
