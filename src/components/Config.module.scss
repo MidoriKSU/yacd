@@ -45,7 +45,8 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
     'label1 label2'
-    'ctrl1  ctrl2';
+    'ctrl1  ctrl2'
+    'action .';
   max-width: 900px;
   gap: 0 12px;
   padding: 6px 8px 10px;
@@ -61,7 +62,8 @@
       'label1'
       'ctrl1'
       'label2'
-      'ctrl2';
+      'ctrl2'
+      'action';
   }
 
   .label1 {
@@ -82,6 +84,10 @@
 
   .control2 {
     grid-area: ctrl2;
+  }
+
+  .action {
+    grid-area: action;
   }
 
   .optional {

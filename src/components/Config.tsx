@@ -220,6 +220,8 @@ function ConfigImpl({
     dispatch(updateGeoDatabasesFile(apiConfig));
   }, [apiConfig, dispatch]);
 
+  const [isEditingNative, setIsEditingNative] = useState(false);
+
   const handleSingBoxEndpointBlur = useCallback<React.FocusEventHandler<HTMLInputElement>>(
     (e) => {
       dispatch(updateSingBoxConfig({ endpoint: e.target.value.trim(), secret: singBoxConfig?.secret || '' }));
@@ -232,6 +234,25 @@ function ConfigImpl({
       dispatch(updateSingBoxConfig({ endpoint: singBoxConfig?.endpoint || '', secret: e.target.value.trim() }));
     },
     [dispatch, singBoxConfig],
+  );
+
+  const handleConfirmSwitch = useCallback(() => {
+    const endpointEl = document.querySelector<HTMLInputElement>('input[name="singBoxEndpoint"]');
+    const secretEl = document.querySelector<HTMLInputElement>('input[name="singBoxSecret"]');
+    const endpoint = endpointEl ? endpointEl.value.trim() : (singBoxConfig?.endpoint || '');
+    const secret = secretEl ? secretEl.value.trim() : (singBoxConfig?.secret || '');
+    dispatch(updateSingBoxConfig({ endpoint, secret }));
+    setIsEditingNative(false);
+  }, [dispatch, singBoxConfig]);
+
+  const handleInputKeyDown = useCallback<React.KeyboardEventHandler<HTMLInputElement>>(
+    (e) => {
+      if (e.key === 'Enter') {
+        e.currentTarget.blur();
+        handleConfirmSwitch();
+      }
+    },
+    [handleConfirmSwitch],
   );
 
   const mode = useMemo(() => {
@@ -403,30 +424,57 @@ function ConfigImpl({
         <div />
       </div>
 
-      <div className={s0.nativeSection}>
-        <div className={s0.label1}>Native API Base URL</div>
-        <div className={s0.label2}>
-          Native API Secret <span className={s0.optional}>(optional)</span>
+      {!isEditingNative && Boolean(singBoxConfig?.endpoint) ? (
+        <div className={s0.section}>
+          <div>
+            <div className={s0.label}>
+              Native API
+              <p>{singBoxConfig.endpoint}</p>
+            </div>
+            <div className={s0.label}>Action</div>
+            <Button
+              start={<LogOut size={16} />}
+              label={t('switch_backend')}
+              onClick={() => setIsEditingNative(true)}
+            />
+          </div>
         </div>
-        <div className={s0.control1}>
-          <SelfControlledInput
-            name="singBoxEndpoint"
-            type="text"
-            value={singBoxConfig?.endpoint || ''}
-            placeholder="http://127.0.0.1:9080"
-            onBlur={handleSingBoxEndpointBlur}
-          />
+      ) : (
+        <div className={s0.nativeSection}>
+          <div className={s0.label1}>Native API Base URL</div>
+          <div className={s0.label2}>
+            Native API Secret <span className={s0.optional}>(optional)</span>
+          </div>
+          <div className={s0.control1}>
+            <SelfControlledInput
+              name="singBoxEndpoint"
+              type="text"
+              value={singBoxConfig?.endpoint || ''}
+              placeholder="http://127.0.0.1:9080"
+              onBlur={handleSingBoxEndpointBlur}
+              onKeyDown={handleInputKeyDown}
+            />
+          </div>
+          <div className={s0.control2}>
+            <SelfControlledInput
+              name="singBoxSecret"
+              type="password"
+              value={singBoxConfig?.secret || ''}
+              placeholder=""
+              onBlur={handleSingBoxSecretBlur}
+              onKeyDown={handleInputKeyDown}
+            />
+          </div>
+          <div className={s0.action}>
+            <div className={s0.label}>Action</div>
+            <Button
+              start={<LogOut size={16} />}
+              label={t('switch_backend')}
+              onClick={handleConfirmSwitch}
+            />
+          </div>
         </div>
-        <div className={s0.control2}>
-          <SelfControlledInput
-            name="singBoxSecret"
-            type="password"
-            value={singBoxConfig?.secret || ''}
-            placeholder=""
-            onBlur={handleSingBoxSecretBlur}
-          />
-        </div>
-      </div>
+      )}
     </div>
   );
 }
