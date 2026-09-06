@@ -59,6 +59,8 @@ function TrafficNow({
   let downloadTotalStr = '--';
   let connectionsLabel = t('Connections');
   let connectionsStr = '--';
+  let connectionsInStr = '--';
+  let connectionsOutStr = '--';
   let memoryStr = '--';
   let goroutinesStr = '--';
 
@@ -75,7 +77,8 @@ function TrafficNow({
       nativeStatus.connectionsIn !== undefined &&
       nativeStatus.connectionsOut !== undefined
     ) {
-      connectionsStr = `In: ${nativeStatus.connectionsIn} / Out: ${nativeStatus.connectionsOut}`;
+      connectionsInStr = String(nativeStatus.connectionsIn);
+      connectionsOutStr = String(nativeStatus.connectionsOut);
     }
     if (nativeStatus) {
       memoryStr = formatMemoryBytes(nativeStatus.memory);
@@ -112,7 +115,14 @@ function TrafficNow({
       </div>
       <div className={s0.sec}>
         <div>{connectionsLabel}</div>
-        <div>{connectionsStr}</div>
+        {isNativeSource ? (
+          <div className={s0.connDualRow}>
+            <div className={s0.connRow}>{`In: ${connectionsInStr}`}</div>
+            <div className={s0.connRow}>{`Out: ${connectionsOutStr}`}</div>
+          </div>
+        ) : (
+          <div>{connectionsStr}</div>
+        )}
       </div>
       <div className={s0.sec}>
         <div>{t('Memory Total')}</div>
