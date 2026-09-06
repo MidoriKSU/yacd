@@ -51,6 +51,22 @@ export interface MemoryChartSource {
   subscribe: (fn: () => void) => () => void;
 }
 
+const MEMORY_BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+
+export function formatMemoryBytes(value: number | bigint): string {
+  let num = Number(value);
+  if (!Number.isFinite(num) || num < 0) {
+    num = 0;
+  }
+  let unitIndex = 0;
+  while (num >= 1024 && unitIndex < MEMORY_BYTE_UNITS.length - 1) {
+    num /= 1024;
+    unitIndex += 1;
+  }
+  const rounded = unitIndex === 0 ? String(Math.round(num)) : num.toFixed(1).replace(/\.0$/, '');
+  return `${rounded} ${MEMORY_BYTE_UNITS[unitIndex]}`;
+}
+
 export function normalizeEndpoint(raw: string): string {
   let u = (raw || '').trim();
   if (!u) return '';
@@ -348,9 +364,6 @@ export class SingBoxClient {
 
       const client = createClient(StartedService, transport);
 
-      // Verify Service API via low-cost unary RPC first
-      await client.getVersion({}, { signal: controller.signal });
-
       // Subscribe to status streaming
       const statusStream = client.subscribeStatus(
         { interval: 1_000_000_000n },
@@ -362,13 +375,15 @@ export class SingBoxClient {
         this.phase = 'connected';
         this.error = undefined;
         this.onNewStatus({
-          trafficAvailable: true,
+          trafficAvailable: Boolean(msg.trafficAvailable),
           uplink: Number(msg.uplink),
           downlink: Number(msg.downlink),
           uplinkTotal: Number(msg.uplinkTotal),
           downlinkTotal: Number(msg.downlinkTotal),
           memory: Number(msg.memory),
           goroutines: msg.goroutines,
+          connectionsIn: msg.connectionsIn,
+          connectionsOut: msg.connectionsOut,
         });
       }
 
@@ -396,8 +411,8 @@ export class SingBoxClient {
 
     const now = Date.now();
     this.chartLabels.push(now);
-    this.chartUp.push(status.trafficAvailable ? status.uplink : 0);
-    this.chartDown.push(status.trafficAvailable ? status.downlink : 0);
+    this.chartUp.push(status.trafficAvailable ? status.uplink : undefined);
+    this.chartDown.push(status.trafficAvailable ? status.downlink : undefined);
     this.chartInuse.push(status.memory);
 
     if (this.chartLabels.length > CHART_SIZE) {

@@ -1,6 +1,6 @@
 import { createAsset } from 'use-asset';
 
-import prettyBytes from './pretty-bytes';
+import { formatMemoryBytes } from '../api/singbox';
 export const chartJSResource = createAsset(() => {
   return import('src/misc/chart-lib');
 });
@@ -28,8 +28,8 @@ export const memoryChartOptions: import('chart.js').ChartOptions<'line'> = {
       },
       ticks: {
         maxTicksLimit: 3,
-        callback(value: number) {
-          return prettyBytes(value);
+        callback(value: number | string) {
+          return formatMemoryBytes(Number(value));
         },
       },
     },
