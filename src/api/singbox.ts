@@ -120,219 +120,6 @@ export function validateEndpoint(raw: string): EndpointValidationResult {
     isPrivate,
   };
 }
-
-export function getTargetAddressSpace(urlStr: string): 'loopback' | 'local' | undefined {
-  const val = validateEndpoint(urlStr);
-  if (!val.valid) return undefined;
-  if (val.isLoopback) return 'loopback';
-  if (val.isPrivate) return 'local';
-  return undefined;
-}
-
-export function getFetchInitWithLNA(init: RequestInit, targetUrl: string): RequestInit {
-  const options: RequestInit = { ...init };
-  const targetSpace = getTargetAddressSpace(targetUrl);
-  if (
-    targetSpace &&
-    typeof Request !== 'undefined' &&
-    'targetAddressSpace' in Request.prototype
-  ) {
-    (options as any).targetAddressSpace = targetSpace;
-  }
-  return options;
-}
-
-// Protobuf wire-format helpers
-export function decodeVarint(bytes: Uint8Array, offset: number): [bigint, number] {
-  let result = 0n;
-  let shift = 0n;
-  let i = offset;
-  while (i < bytes.length) {
-    const byte = bytes[i++];
-    result |= BigInt(byte & 0x7f) << shift;
-    if ((byte & 0x80) === 0) break;
-    shift += 7n;
-  }
-  return [result, i];
-}
-
-export function encodeVarint(val: bigint | number): Uint8Array {
-  let v = BigInt(val);
-  const bytes: number[] = [];
-  while (v >= 0x80n) {
-    bytes.push(Number((v & 0x7fn) | 0x80n));
-    v >>= 7n;
-  }
-  bytes.push(Number(v & 0x7fn));
-  return new Uint8Array(bytes);
-}
-
-// Decode daemon.Status protobuf message
-export function decodeStatus(bytes: Uint8Array): SingBoxStatus {
-  let i = 0;
-  const s: SingBoxStatus = {
-    memory: 0,
-    memoryRaw: 0n,
-    goroutines: 0,
-    connectionsIn: 0,
-    connectionsOut: 0,
-    trafficAvailable: false,
-    uplink: 0,
-    downlink: 0,
-    uplinkTotal: 0,
-    downlinkTotal: 0,
-  };
-
-  while (i < bytes.length) {
-    const [tag, nextTag] = decodeVarint(bytes, i);
-    i = nextTag;
-    const field = Number(tag >> 3n);
-    const wire = Number(tag & 0x07n);
-
-    if (wire === 0) {
-      const [val, nextVal] = decodeVarint(bytes, i);
-      i = nextVal;
-      switch (field) {
-        case 1:
-          s.memoryRaw = val;
-          s.memory = Number(val);
-          break;
-        case 2:
-          s.goroutines = Number(val);
-          break;
-        case 3:
-          s.connectionsIn = Number(val);
-          break;
-        case 4:
-          s.connectionsOut = Number(val);
-          break;
-        case 5:
-          s.trafficAvailable = val !== 0n;
-          break;
-        case 6:
-          s.uplink = Number(val);
-          break;
-        case 7:
-          s.downlink = Number(val);
-          break;
-        case 8:
-          s.uplinkTotal = Number(val);
-          break;
-        case 9:
-          s.downlinkTotal = Number(val);
-          break;
-      }
-    } else if (wire === 2) {
-      const [len, nextLen] = decodeVarint(bytes, i);
-      i = nextLen + Number(len);
-    } else if (wire === 1) {
-      i += 8;
-    } else if (wire === 5) {
-      i += 4;
-    } else {
-      break;
-    }
-  }
-  return s;
-}
-
-export function decodeStartedAt(bytes: Uint8Array): number | null {
-  let i = 0;
-  let startedAt: number | null = null;
-  while (i < bytes.length) {
-    const [tag, nextTag] = decodeVarint(bytes, i);
-    i = nextTag;
-    const field = Number(tag >> 3n);
-    const wire = Number(tag & 0x07n);
-    if (wire === 0) {
-      const [val, nextVal] = decodeVarint(bytes, i);
-      i = nextVal;
-      if (field === 1) startedAt = Number(val);
-    } else if (wire === 2) {
-      const [len, nextLen] = decodeVarint(bytes, i);
-      i = nextLen + Number(len);
-    } else if (wire === 1) {
-      i += 8;
-    } else if (wire === 5) {
-      i += 4;
-    } else {
-      break;
-    }
-  }
-  return startedAt;
-}
-
-export function formatUptime(epochMs: number): string {
-  const diffSec = Math.max(0, Math.floor((Date.now() - epochMs) / 1000));
-  const h = Math.floor(diffSec / 3600);
-  const m = Math.floor((diffSec % 3600) / 60);
-  const s = diffSec % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-const MEM_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-export function formatMemoryBytes(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return '0 B';
-  if (n < 1000) return n + ' B';
-  const exponent = Math.min(Math.floor(Math.log10(n) / 3), MEM_UNITS.length - 1);
-  const formatted = Number((n / Math.pow(1000, exponent)).toPrecision(3));
-  return `${formatted} ${MEM_UNITS[exponent]}`;
-}
-
-export function parseGrpcTrailers(text: string): { grpcStatus?: string; grpcMessage?: string } {
-  const lines = text.split(/\r?\n/);
-  let grpcStatus: string | undefined;
-  let grpcMessage: string | undefined;
-  for (const line of lines) {
-    const colon = line.indexOf(':');
-    if (colon > 0) {
-      const key = line.slice(0, colon).trim().toLowerCase();
-      const val = line.slice(colon + 1).trim();
-      if (key === 'grpc-status') {
-        grpcStatus = val;
-      } else if (key === 'grpc-message') {
-        try {
-          grpcMessage = decodeURIComponent(val);
-        } catch {
-          grpcMessage = val;
-        }
-      }
-    }
-  }
-  return { grpcStatus, grpcMessage };
-}
-
-// Build 5-byte framed SubscribeStatusRequest protobuf message (interval = 1s = 1e9 ns)
-export function buildSubscribeStatusPayload(): Uint8Array {
-  // tag: field 1, wire type 0 = (1 << 3) | 0 = 0x08
-  const tag = new Uint8Array([0x08]);
-  const varintInterval = encodeVarint(1_000_000_000n);
-  const msg = new Uint8Array(tag.length + varintInterval.length);
-  msg.set(tag, 0);
-  msg.set(varintInterval, tag.length);
-
-  // 5-byte gRPC-web frame prefix: 0x00 flag + 4-byte big-endian length
-  const frame = new Uint8Array(5 + msg.length);
-  frame[0] = 0x00;
-  frame[1] = (msg.length >>> 24) & 0xff;
-  frame[2] = (msg.length >>> 16) & 0xff;
-  frame[3] = (msg.length >>> 8) & 0xff;
-  frame[4] = msg.length & 0xff;
-  frame.set(msg, 5);
-  return frame;
-}
-
-// Build 6-byte framed SubscribeStatusRequest protobuf message for grpc-websockets:
-export function buildSubscribeStatusWsPayload(): Uint8Array {
-  const grpcFrame = buildSubscribeStatusPayload();
-  const wsFrame = new Uint8Array(1 + grpcFrame.length);
-  wsFrame[0] = 0x00; // WebSocket DATA frame signal
-  wsFrame.set(grpcFrame, 1);
-  return wsFrame;
-}
-
 const STORAGE_CONFIG_KEY = 'yacd.singbox.config';
 const CHART_SIZE = 150;
 
@@ -346,10 +133,10 @@ export class SingBoxClient {
   private currentStatus: SingBoxStatus | null = null;
 
   private chartListeners = new Set<() => void>();
-  private chartLabels: (number | string)[] = Array(CHART_SIZE).fill(0);
-  private chartUp: (number | undefined)[] = Array(CHART_SIZE);
-  private chartDown: (number | undefined)[] = Array(CHART_SIZE);
-  private chartInuse: (number | undefined)[] = Array(CHART_SIZE);
+  private chartLabels: (number | string)[] = [];
+  private chartUp: (number | undefined)[] = [];
+  private chartDown: (number | undefined)[] = [];
+  private chartInuse: (number | undefined)[] = [];
 
   public readonly trafficChartSource: TrafficChartSource = {
     labels: this.chartLabels,
@@ -595,16 +382,18 @@ export class SingBoxClient {
   private onNewStatus(status: SingBoxStatus) {
     this.currentStatus = status;
 
-    this.chartUp.shift();
-    this.chartDown.shift();
-    this.chartInuse.shift();
-    this.chartLabels.shift();
-
     const now = Date.now();
+    this.chartLabels.push(now);
     this.chartUp.push(status.trafficAvailable ? status.uplink : 0);
     this.chartDown.push(status.trafficAvailable ? status.downlink : 0);
     this.chartInuse.push(status.memory);
-    this.chartLabels.push(now);
+
+    if (this.chartLabels.length > CHART_SIZE) {
+      this.chartLabels.shift();
+      this.chartUp.shift();
+      this.chartDown.shift();
+      this.chartInuse.shift();
+    }
 
     for (const fn of this.chartListeners) {
       try {
