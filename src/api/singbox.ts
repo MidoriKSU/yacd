@@ -1,5 +1,8 @@
-// Minimal native sing-box Service API client & adapter
-// Implements daemon.StartedService/SubscribeStatus gRPC-Web streaming (WebSocket & HTTP)
+import { createClient } from '@connectrpc/connect';
+import { createGrpcWebTransport } from '@connectrpc/connect-web';
+
+import { StartedService } from './gen/daemon/started_service_pb.js';
+
 
 
 export interface SingBoxStatus {
@@ -36,15 +39,15 @@ export interface SingBoxConfig {
 }
 
 export interface TrafficChartSource {
-  labels: string[];
-  up: number[];
-  down: number[];
+  labels: (number | string)[];
+  up: (number | undefined)[];
+  down: (number | undefined)[];
   subscribe: (fn: () => void) => () => void;
 }
 
 export interface MemoryChartSource {
-  labels: string[];
-  inuse: number[];
+  labels: (number | string)[];
+  inuse: (number | undefined)[];
   subscribe: (fn: () => void) => () => void;
 }
 
@@ -331,10 +334,9 @@ export function buildSubscribeStatusWsPayload(): Uint8Array {
 }
 
 const STORAGE_CONFIG_KEY = 'yacd.singbox.config';
-const MAX_HISTORY_POINTS = 60;
+const CHART_SIZE = 150;
 
 export class SingBoxClient {
-  private ws: WebSocket | null = null;
   private abortController: AbortController | null = null;
   private listeners = new Set<(snapshot: SingBoxSnapshot) => void>();
   private reconnectTimer: any = null;
@@ -344,10 +346,10 @@ export class SingBoxClient {
   private currentStatus: SingBoxStatus | null = null;
 
   private chartListeners = new Set<() => void>();
-  private chartLabels: string[] = [];
-  private chartUp: number[] = [];
-  private chartDown: number[] = [];
-  private chartInuse: number[] = [];
+  private chartLabels: (number | string)[] = Array(CHART_SIZE).fill(0);
+  private chartUp: (number | undefined)[] = Array(CHART_SIZE);
+  private chartDown: (number | undefined)[] = Array(CHART_SIZE);
+  private chartInuse: (number | undefined)[] = Array(CHART_SIZE);
 
   public readonly trafficChartSource: TrafficChartSource = {
     labels: this.chartLabels,
@@ -476,21 +478,45 @@ export class SingBoxClient {
   }
 
   private closeExisting() {
-    if (this.ws) {
-      try {
-        this.ws.close();
-      } catch {
-        // ignore
-      }
-      this.ws = null;
-    }
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
     }
   }
 
-  private startConnection() {
+  public async testConnection(): Promise<{
+    ok: boolean;
+    version?: string;
+    apiVersion?: number;
+    error?: string;
+  }> {
+    const targetUrl = this.endpoint;
+    if (!targetUrl) {
+      return { ok: false, error: 'Endpoint is not configured' };
+    }
+    try {
+      const secret = this.effectiveSecret();
+      const transport = createGrpcWebTransport({
+        baseUrl: targetUrl,
+        interceptors: [
+          (next) => (request) => {
+            request.header.set('Accept-Language', 'en');
+            if (secret) {
+              request.header.set('Authorization', `Bearer ${secret}`);
+            }
+            return next(request);
+          },
+        ],
+      });
+      const client = createClient(StartedService, transport);
+      const res = await client.getVersion({});
+      return { ok: true, version: res.version, apiVersion: res.apiVersion };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || 'Connection failed' };
+    }
+  }
+
+  private async startConnection() {
     const targetUrl = this.endpoint;
     if (!targetUrl) {
       this.phase = 'unconfigured';
@@ -503,215 +529,64 @@ export class SingBoxClient {
     this.error = undefined;
     this.notify();
 
-    if (typeof WebSocket !== 'undefined') {
-      this.connectWebSocket(targetUrl);
-    } else {
-      this.connectHttpStream(targetUrl);
-    }
-  }
-
-  private connectWebSocket(baseUrl: string) {
-    try {
-      const wsUrl =
-        baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:') +
-        '/daemon.StartedService/SubscribeStatus';
-      const ws = new WebSocket(wsUrl, ['grpc-websockets']);
-      this.ws = ws;
-      ws.binaryType = 'arraybuffer';
-
-      let buffer = new Uint8Array(0);
-
-      ws.onopen = () => {
-        let headers =
-          'content-type: application/grpc-web+proto\r\nx-grpc-web: 1\r\naccept-language: en\r\n';
-        const secret = this.effectiveSecret();
-        if (secret) {
-          headers += `authorization: Bearer ${secret}\r\n`;
-        }
-        headers += '\r\n';
-        ws.send(new TextEncoder().encode(headers));
-
-        const reqPayload = buildSubscribeStatusWsPayload();
-        ws.send(reqPayload);
-        ws.send(new Uint8Array([1]));
-      };
-
-      ws.onmessage = (evt) => {
-        const chunk = new Uint8Array(evt.data as ArrayBuffer);
-        const merged = new Uint8Array(buffer.length + chunk.length);
-        merged.set(buffer);
-        merged.set(chunk, buffer.length);
-        buffer = merged;
-
-        while (buffer.length >= 5) {
-          const flag = buffer[0];
-          const len =
-            ((buffer[1] << 24) | (buffer[2] << 16) | (buffer[3] << 8) | buffer[4]) >>> 0;
-          if (buffer.length < 5 + len) break;
-
-          const body = buffer.slice(5, 5 + len);
-          buffer = buffer.slice(5 + len);
-
-          if ((flag & 0x80) !== 0) {
-            // Trailer frame
-            const trailerText = new TextDecoder().decode(body);
-            const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
-            if (grpcStatus && grpcStatus !== '0') {
-              this.phase = 'error';
-              this.error = `gRPC Error (${grpcStatus}): ${grpcMessage || 'stream failed'}`;
-              this.notify();
-              this.scheduleReconnect();
-              return;
-            }
-          } else {
-            // Valid telemetry status data frame
-            try {
-              const status = decodeStatus(body);
-              this.phase = 'connected';
-              this.error = undefined;
-              this.onNewStatus(status);
-            } catch (err) {
-              // eslint-disable-next-line no-console
-              console.warn('singbox status decode error', err);
-            }
-          }
-        }
-      };
-
-      ws.onerror = () => {
-        if (this.phase === 'connecting') {
-          this.ws = null;
-          this.connectHttpStream(baseUrl);
-        }
-      };
-
-      ws.onclose = (evt) => {
-        if (this.ws === ws) {
-          this.ws = null;
-          if (this.phase === 'connected') {
-            this.phase = 'disconnected';
-          } else {
-            this.phase = 'error';
-            this.error = evt.reason ? `Connection closed: ${evt.reason}` : 'Connection closed';
-          }
-          this.notify();
-          this.scheduleReconnect();
-        }
-      };
-    } catch {
-      this.connectHttpStream(baseUrl);
-    }
-  }
-
-  private async connectHttpStream(baseUrl: string) {
-    if (this.ws) return;
     const controller = new AbortController();
     this.abortController = controller;
-    const connectTimer = setTimeout(() => {
-      controller.abort();
-    }, 10000);
-    const httpUrl = baseUrl + '/daemon.StartedService/SubscribeStatus';
 
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/grpc-web+proto',
-        'X-Grpc-Web': '1',
-      };
       const secret = this.effectiveSecret();
-      if (secret) {
-        headers['Authorization'] = `Bearer ${secret}`;
-      }
+      const transport = createGrpcWebTransport({
+        baseUrl: targetUrl,
+        interceptors: [
+          (next) => (request) => {
+            request.header.set('Accept-Language', 'en');
+            if (secret) {
+              request.header.set('Authorization', `Bearer ${secret}`);
+            }
+            return next(request);
+          },
+        ],
+      });
 
-      const reqPayload = buildSubscribeStatusPayload();
-      const fetchInit = getFetchInitWithLNA(
-        {
-          method: 'POST',
-          headers,
-          body: reqPayload,
-          signal: controller.signal,
-        },
-        baseUrl
+      const client = createClient(StartedService, transport);
+
+      // Verify Service API via low-cost unary RPC first
+      await client.getVersion({}, { signal: controller.signal });
+
+      // Subscribe to status streaming
+      const statusStream = client.subscribeStatus(
+        { interval: 1_000_000_000n },
+        { signal: controller.signal }
       );
-      const res = await fetch(httpUrl, fetchInit);
-      clearTimeout(connectTimer);
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      for await (const msg of statusStream) {
+        if (controller.signal.aborted) break;
+        this.phase = 'connected';
+        this.error = undefined;
+        this.onNewStatus({
+          trafficAvailable: true,
+          uplink: Number(msg.uplink),
+          downlink: Number(msg.downlink),
+          uplinkTotal: Number(msg.uplinkTotal),
+          downlinkTotal: Number(msg.downlinkTotal),
+          memory: Number(msg.memory),
+          goroutines: msg.goroutines,
+        });
       }
 
-      const headerGrpcStatus = res.headers.get('grpc-status');
-      if (headerGrpcStatus && headerGrpcStatus !== '0') {
-        const msg = res.headers.get('grpc-message') || `code ${headerGrpcStatus}`;
-        this.phase = 'error';
-        this.error = `gRPC Error (${headerGrpcStatus}): ${msg}`;
+      if (!controller.signal.aborted) {
+        if (this.phase === 'connected') {
+          this.phase = 'disconnected';
+        } else {
+          this.phase = 'error';
+          this.error = 'Stream closed';
+        }
         this.notify();
         this.scheduleReconnect();
-        return;
       }
-
-      if (!res.body) {
-        throw new Error('Response body is empty');
-      }
-
-      const reader = res.body.getReader();
-      let buffer = new Uint8Array(0);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          const merged = new Uint8Array(buffer.length + value.length);
-          merged.set(buffer);
-          merged.set(value, buffer.length);
-          buffer = merged;
-
-          while (buffer.length >= 5) {
-            const flag = buffer[0];
-            const len =
-              ((buffer[1] << 24) | (buffer[2] << 16) | (buffer[3] << 8) | buffer[4]) >>> 0;
-            if (buffer.length < 5 + len) break;
-
-            const body = buffer.slice(5, 5 + len);
-            buffer = buffer.slice(5 + len);
-
-            if ((flag & 0x80) !== 0) {
-              const trailerText = new TextDecoder().decode(body);
-              const { grpcStatus, grpcMessage } = parseGrpcTrailers(trailerText);
-              if (grpcStatus && grpcStatus !== '0') {
-                this.phase = 'error';
-                this.error = `gRPC Error (${grpcStatus}): ${grpcMessage || 'stream failed'}`;
-                this.notify();
-                this.scheduleReconnect();
-                return;
-              }
-            } else {
-              try {
-                const status = decodeStatus(body);
-                this.phase = 'connected';
-                this.error = undefined;
-                this.onNewStatus(status);
-              } catch (err) {
-                // eslint-disable-next-line no-console
-                console.warn('singbox status decode error', err);
-              }
-            }
-          }
-        }
-      }
-
-      if (this.phase === 'connected') {
-        this.phase = 'disconnected';
-      } else {
-        this.phase = 'error';
-        this.error = 'Connection closed without telemetry';
-      }
-      this.notify();
-      this.scheduleReconnect();
     } catch (err: any) {
-      clearTimeout(connectTimer);
       if (controller.signal.aborted && this.abortController !== controller) return;
       this.phase = 'error';
-      this.error = err?.message || 'Transport Error';
+      this.error = err?.message || 'Failed to connect';
       this.notify();
       this.scheduleReconnect();
     }
@@ -719,28 +594,17 @@ export class SingBoxClient {
 
   private onNewStatus(status: SingBoxStatus) {
     this.currentStatus = status;
+
+    this.chartUp.shift();
+    this.chartDown.shift();
+    this.chartInuse.shift();
+    this.chartLabels.shift();
+
     const now = Date.now();
-    const timeLabel = new Date(now).toLocaleTimeString();
-
-    this.chartLabels.push(timeLabel);
-    if (this.chartLabels.length > MAX_HISTORY_POINTS) {
-      this.chartLabels.shift();
-    }
-
     this.chartUp.push(status.trafficAvailable ? status.uplink : 0);
-    if (this.chartUp.length > MAX_HISTORY_POINTS) {
-      this.chartUp.shift();
-    }
-
     this.chartDown.push(status.trafficAvailable ? status.downlink : 0);
-    if (this.chartDown.length > MAX_HISTORY_POINTS) {
-      this.chartDown.shift();
-    }
-
     this.chartInuse.push(status.memory);
-    if (this.chartInuse.length > MAX_HISTORY_POINTS) {
-      this.chartInuse.shift();
-    }
+    this.chartLabels.push(now);
 
     for (const fn of this.chartListeners) {
       try {

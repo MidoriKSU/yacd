@@ -29,6 +29,9 @@
   "private": true,
   "license": "MIT",
   "dependencies": {
+    "@bufbuild/protobuf": "^2.14.0",
+    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-web": "^2.1.2",
     "@fontsource/roboto-mono": "5.0.8",
     "@reach/menu-button": "0.18.0",
     "@reach/tooltip": "0.18.0",
