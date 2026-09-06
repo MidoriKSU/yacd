@@ -29,7 +29,7 @@ function TrafficNow({ apiConfig }: { apiConfig: ClashAPIConfig }) {
     });
   }, []);
 
-  const { upTotal, dlTotal, connNumber } = useConnection(apiConfig);
+  const connNumber = useActiveConnections(apiConfig);
 
   const nativeStatus = snapshot.status;
 
@@ -43,11 +43,11 @@ function TrafficNow({ apiConfig }: { apiConfig: ClashAPIConfig }) {
 
   const uploadTotalStr = nativeStatus
     ? prettyBytes(nativeStatus.uplinkTotal)
-    : (upTotal || '--');
+    : '--';
 
   const downloadTotalStr = nativeStatus
     ? prettyBytes(nativeStatus.downlinkTotal)
-    : (dlTotal || '--');
+    : '--';
 
   const activeConnStr = connNumber !== undefined ? String(connNumber) : '--';
 
@@ -93,25 +93,20 @@ function TrafficNow({ apiConfig }: { apiConfig: ClashAPIConfig }) {
   );
 }
 
-function useConnection(apiConfig: ClashAPIConfig) {
-  const [state, setState] = useState({
-    upTotal: '0 B',
-    dlTotal: '0 B',
-    connNumber: 0,
-  });
+function useActiveConnections(apiConfig: ClashAPIConfig) {
+  const [connNumber, setConnNumber] = useState<number | undefined>(undefined);
   const read = useCallback(
-    ({ downloadTotal, uploadTotal, connections }) => {
-      setState({
-        upTotal: prettyBytes(uploadTotal),
-        dlTotal: prettyBytes(downloadTotal),
-        connNumber: connections ? connections.length : 0,
-      });
+    (data: any) => {
+      if (data && Array.isArray(data.connections)) {
+        setConnNumber(data.connections.length);
+      }
     },
-    [setState],
+    [setConnNumber],
   );
   useEffect(() => {
     if (!apiConfig || !apiConfig.baseURL) return;
     return connAPI.fetchData(apiConfig, read);
   }, [apiConfig, read]);
-  return state;
+  return connNumber;
 }
+
