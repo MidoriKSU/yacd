@@ -24,6 +24,7 @@ import {
   getNativeAPIConfig,
   getSelectedChartStyleIndex,
   getSingBoxConfig,
+  hasSelectedClashBackend,
   hasSelectedNativeBackend,
 } from '../store/app';
 import { fetchConfigs, flushFakeIPPool, getConfigs, reloadConfigs, updateConfigs, updateGeoDatabasesFile } from '../store/configs';
@@ -73,6 +74,7 @@ const mapState2 = (s: State) => ({
   apiConfig: getClashAPIConfig(s),
   singBoxConfig: getSingBoxConfig(s),
   nativeAPIConfig: getNativeAPIConfig(s),
+  hasClashBackend: hasSelectedClashBackend(s),
   hasNativeBackend: hasSelectedNativeBackend(s),
 });
 
@@ -104,6 +106,7 @@ type ConfigImplProps = {
   apiConfig?: ClashAPIConfig;
   singBoxConfig: SingBoxConfig;
   nativeAPIConfig?: NativeAPIConfig;
+  hasClashBackend: boolean;
   hasNativeBackend: boolean;
 };
 
@@ -125,6 +128,7 @@ function ConfigImpl({
   apiConfig,
   singBoxConfig,
   nativeAPIConfig,
+  hasClashBackend,
   hasNativeBackend,
 }: ConfigImplProps) {
   const navigate = useNavigate();
@@ -389,17 +393,17 @@ function ConfigImpl({
         </div>
         <div>
           <div className={s0.label}>
-            {t('current_backend')}
+            {t('clash_api') || 'Clash API'}
             <p>
-              {apiConfig?.baseURL
+              {hasClashBackend && apiConfig?.baseURL
                 ? getBackendContent(version) + apiConfig.baseURL
                 : t('unconfigured') || 'Not configured'}
             </p>
           </div>
           <div className={s0.label}>Action</div>
           <Button
-            start={<LogOut size={16} />}
-            label={t('switch_backend')}
+            start={hasClashBackend ? <LogOut size={16} /> : <Sliders size={16} />}
+            label={hasClashBackend ? t('switch_backend') : (t('configure') || 'Configure')}
             onClick={openAPIConfigModal}
           />
         </div>
