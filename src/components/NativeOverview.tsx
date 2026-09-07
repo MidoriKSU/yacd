@@ -10,6 +10,11 @@ import s0 from './NativeOverview.module.scss';
 const { useEffect, useState } = React;
 const STATUS_HISTORY_LENGTH = 30;
 
+type ModeState = {
+  modeList: string[];
+  currentMode: string;
+};
+
 type NativeOverviewState = {
   snapshot: SingBoxSnapshot;
   uplinkHistory: number[];
@@ -24,6 +29,8 @@ export default function NativeOverview() {
     downlinkHistory: [],
   }));
   const { snapshot, uplinkHistory, downlinkHistory } = state;
+  const [mode, setMode] = useState<ModeState | null>(null);
+  const [pendingMode, setPendingMode] = useState<string | null>(null);
   const status = snapshot.status;
   const trafficAvailable = status?.trafficAvailable ?? false;
   const connected = snapshot.phase === 'connected' && status !== null;
@@ -47,6 +54,8 @@ export default function NativeOverview() {
       }),
     [],
   );
+
+  useEffect(() => singBoxClient.subscribeClashMode(setMode), []);
 
   let stateLabel: string | null = null;
   if (!connected) {
@@ -101,6 +110,29 @@ export default function NativeOverview() {
             <DataLine label={t('Inbound')} value={status?.connectionsIn ?? '...'} />
             <DataLine label={t('Outbound')} value={status?.connectionsOut ?? '...'} />
           </NativeCard>
+          {mode && mode.modeList.length > 1 ? (
+            <NativeCard wide icon={<Activity />} title={t('Mode')}>
+              <div className={s0.modeList}>
+                {mode.modeList.map((item) => (
+                  <button
+                    type="button"
+                    key={item}
+                    className={item === mode.currentMode ? s0.modeSelected : undefined}
+                    disabled={pendingMode !== null}
+                    onClick={() => {
+                      setPendingMode(item);
+                      singBoxClient.setClashMode(item).then(
+                        () => setPendingMode(null),
+                        () => setPendingMode(null),
+                      );
+                    }}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </NativeCard>
+          ) : null}
         </div>
       </div>
     </div>
@@ -111,13 +143,15 @@ function NativeCard({
   icon,
   title,
   children,
+  wide = false,
 }: {
   icon: React.ReactNode;
   title: React.ReactNode;
   children: React.ReactNode;
+  wide?: boolean;
 }) {
   return (
-    <div className={s0.card}>
+    <div className={`${s0.card} ${wide ? s0.wide : ''}`}>
       <div className={s0.cardHeader}>
         {icon}
         <span>{title}</span>

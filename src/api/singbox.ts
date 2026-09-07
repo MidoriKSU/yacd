@@ -36,6 +36,11 @@ export interface SingBoxConfig {
   secret: string;
 }
 
+export interface SingBoxModeSnapshot {
+  modeList: string[];
+  currentMode: string;
+}
+
 export interface TrafficChartSource {
   labels: (number | string)[];
   up: (number | undefined)[];
@@ -175,6 +180,9 @@ const CHART_SIZE = 150;
 
 export class SingBoxClient {
   private abortController: AbortController | null = null;
+  private modeAbortController: AbortController | null = null;
+  private modeGeneration = 0;
+  private modeListeners = new Set<(snapshot: SingBoxModeSnapshot) => void>();
   private listeners = new Set<(snapshot: SingBoxSnapshot) => void>();
   private reconnectTimer: any = null;
   private watchdogTimer: any = null;
@@ -277,6 +285,7 @@ export class SingBoxClient {
     const nextEndpoint = normalizeEndpoint(config.endpoint);
     const nextSecret = (config.secret || '').trim();
     const endpointChanged = this.endpoint !== nextEndpoint;
+    const configChanged = endpointChanged || this.secret !== nextSecret;
 
     this.endpoint = nextEndpoint;
     this.secret = nextSecret;
@@ -293,6 +302,12 @@ export class SingBoxClient {
       // ignore
     }
 
+    if (configChanged) {
+      this.closeModeStream();
+      if (this.modeListeners.size > 0) {
+        this.startModeStream();
+      }
+    }
     if (endpointChanged) {
       this.currentStatus = null;
       this.resetChartHistory();
@@ -315,6 +330,24 @@ export class SingBoxClient {
 
   public effectiveSecret(): string {
     return this.secret;
+  }
+
+  public subscribeClashMode(listener: (snapshot: SingBoxModeSnapshot) => void): () => void {
+    this.modeListeners.add(listener);
+    if (this.modeListeners.size === 1) {
+      this.startModeStream();
+    }
+    return () => {
+      this.modeListeners.delete(listener);
+      if (this.modeListeners.size === 0) {
+        this.closeModeStream();
+      }
+    };
+  }
+
+  public async setClashMode(mode: string): Promise<void> {
+    const client = this.createClient(this.endpoint, this.secret);
+    await client.setClashMode({ mode });
   }
 
   public subscribe(listener: (snapshot: SingBoxSnapshot) => void): () => void {
@@ -375,6 +408,55 @@ export class SingBoxClient {
   public reconnect() {
     this.reconnectCount++;
     this.startConnection();
+  }
+
+  private notifyMode(snapshot: SingBoxModeSnapshot) {
+    for (const listener of this.modeListeners) {
+      listener(snapshot);
+    }
+  }
+
+  private createClient(targetUrl: string, secret: string) {
+    const transport = createGrpcWebTransport({
+      baseUrl: targetUrl,
+      interceptors: [
+        (next) => (request) => {
+          request.header.set('Accept-Language', 'en');
+          if (secret) {
+            request.header.set('Authorization', `Bearer ${secret}`);
+          }
+          return next(request);
+        },
+      ],
+    });
+    return createClient(StartedService, transport);
+  }
+
+  private async startModeStream() {
+    const targetUrl = this.endpoint;
+    if (!targetUrl) return;
+    this.closeModeStream();
+    const generation = this.modeGeneration;
+    const controller = new AbortController();
+    this.modeAbortController = controller;
+    try {
+      const client = this.createClient(targetUrl, this.secret);
+      const initial = await client.getClashModeStatus({}, { signal: controller.signal });
+      if (generation !== this.modeGeneration || controller.signal.aborted) return;
+      this.notifyMode({ modeList: initial.modeList, currentMode: initial.currentMode });
+      for await (const mode of client.subscribeClashMode({}, { signal: controller.signal })) {
+        if (generation !== this.modeGeneration || controller.signal.aborted) return;
+        this.notifyMode({ modeList: initial.modeList, currentMode: mode.mode });
+      }
+    } catch {
+      // Mode is optional; status telemetry remains authoritative.
+    }
+  }
+
+  private closeModeStream() {
+    this.modeGeneration++;
+    this.modeAbortController?.abort();
+    this.modeAbortController = null;
   }
 
   private notify() {
@@ -474,21 +556,7 @@ export class SingBoxClient {
     this.armWatchdog(10000);
 
     try {
-      const secret = this.effectiveSecret();
-      const transport = createGrpcWebTransport({
-        baseUrl: targetUrl,
-        interceptors: [
-          (next) => (request) => {
-            request.header.set('Accept-Language', 'en');
-            if (secret) {
-              request.header.set('Authorization', `Bearer ${secret}`);
-            }
-            return next(request);
-          },
-        ],
-      });
-
-      const client = createClient(StartedService, transport);
+      const client = this.createClient(targetUrl, this.effectiveSecret());
 
       // Subscribe to status streaming
       const statusStream = client.subscribeStatus(

@@ -24,6 +24,10 @@
   }
 }
 
+.wide {
+  grid-column: 1 / -1;
+}
+
 .card {
   min-width: 0;
   padding: 20px;
@@ -57,6 +61,31 @@
   margin-bottom: 8px;
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+.modeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  button {
+    padding: 8px 14px;
+    color: var(--color-text);
+    background: transparent;
+    border: 1px solid var(--color-text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+
+    &:disabled {
+      cursor: default;
+      opacity: 0.6;
+    }
+  }
+}
+
+.modeSelected {
+  color: var(--color-text-highlight) !important;
+  background: var(--color-text-secondary) !important;
 }
 
 .dataLine {
