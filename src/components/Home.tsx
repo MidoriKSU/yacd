@@ -1,29 +1,18 @@
-import React, { Suspense } from 'react';
-import { useTranslation } from 'react-i18next';
+import React from 'react';
 
-import ContentHeader from './ContentHeader';
-import s0 from './Home.module.scss';
-import Loading from './Loading';
-import MemoryChart from './MemoryChart';
-import TrafficChart from './TrafficChart';
-import TrafficNow from './TrafficNow';
+import { hasSelectedNativeBackend } from '$src/store/app';
+import { State } from '$src/store/types';
 
-export default function Home() {
-  const { t } = useTranslation();
-  return (
-    <div>
-      <ContentHeader title={t('Overview')} />
-      <div className={s0.root}>
-        <div>
-          <TrafficNow />
-        </div>
-        <div className={s0.chart}>
-          <Suspense fallback={<Loading height="200px" />}>
-            <TrafficChart />
-            <MemoryChart />
-          </Suspense>
-        </div>
-      </div>
-    </div>
-  );
+import LegacyYacdOverview from './LegacyYacdOverview';
+import NativeOverview from './NativeOverview';
+import { connect } from './StateProvider';
+
+const mapState = (s: State) => ({
+  hasNative: hasSelectedNativeBackend(s),
+});
+
+export default connect(mapState)(Home);
+
+function Home({ hasNative }: { hasNative: boolean }) {
+  return hasNative ? <NativeOverview /> : <LegacyYacdOverview />;
 }

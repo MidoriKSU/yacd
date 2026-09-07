@@ -1,163 +1,71 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import * as connAPI from '$src/api/connections';
-import { formatMemoryBytes, singBoxClient, SingBoxSnapshot } from '$src/api/singbox';
-import * as trafficAPI from '$src/api/traffic';
-import prettyBytes from '$src/misc/pretty-bytes';
-import {
-  getClashAPIConfig,
-  hasSelectedClashBackend,
-  hasSelectedNativeBackend,
-} from '$src/store/app';
 import { State } from '$src/store/types';
 import { ClashAPIConfig } from '$src/types';
 
+import * as connAPI from '../api/connections';
+import { fetchData } from '../api/traffic';
+import prettyBytes from '../misc/pretty-bytes';
+import { getClashAPIConfig } from '../store/app';
 import { connect } from './StateProvider';
 import s0 from './TrafficNow.module.scss';
 
 const { useState, useEffect, useCallback } = React;
 
 const mapState = (s: State) => ({
-  hasNative: hasSelectedNativeBackend(s),
-  hasClash: hasSelectedClashBackend(s),
-  clashConfig: getClashAPIConfig(s),
+  apiConfig: getClashAPIConfig(s),
 });
-
 export default connect(mapState)(TrafficNow);
 
-function TrafficNow({
-  hasNative,
-  hasClash,
-  clashConfig,
-}: {
-  hasNative: boolean;
-  hasClash: boolean;
-  clashConfig?: ClashAPIConfig;
-}) {
+function TrafficNow({ apiConfig }: { apiConfig: ClashAPIConfig }) {
   const { t } = useTranslation();
-
-  const isNativeSource = hasNative;
-  const isClashSource = !hasNative && hasClash;
-
-  const [snapshot, setSnapshot] = useState<SingBoxSnapshot>(() => singBoxClient.getSnapshot());
-
-  useEffect(() => {
-    if (!isNativeSource) return;
-    setSnapshot(singBoxClient.getSnapshot());
-    return singBoxClient.subscribe((s) => {
-      setSnapshot(s);
-    });
-  }, [isNativeSource]);
-
-  const clashTraffic = useClashTraffic(clashConfig, isClashSource);
-  const clashConn = useClashConnections(clashConfig, isClashSource);
-
-  let uploadRateStr = '--';
-  let downloadRateStr = '--';
-  let uploadTotalStr = '--';
-  let downloadTotalStr = '--';
-  let connectionsLabel = t('Connections');
-  let connectionsStr = '--';
-  let connectionsInStr = '--';
-  let connectionsOutStr = '--';
-  let memoryStr = '--';
-  let goroutinesStr = '--';
-
-  if (isNativeSource) {
-    const nativeStatus = snapshot.status;
-    if (nativeStatus && nativeStatus.trafficAvailable) {
-      uploadRateStr = `${prettyBytes(nativeStatus.uplink)}/s`;
-      downloadRateStr = `${prettyBytes(nativeStatus.downlink)}/s`;
-      uploadTotalStr = prettyBytes(nativeStatus.uplinkTotal);
-      downloadTotalStr = prettyBytes(nativeStatus.downlinkTotal);
-    }
-    if (
-      nativeStatus &&
-      nativeStatus.connectionsIn !== undefined &&
-      nativeStatus.connectionsOut !== undefined
-    ) {
-      connectionsInStr = String(nativeStatus.connectionsIn);
-      connectionsOutStr = String(nativeStatus.connectionsOut);
-    }
-    if (nativeStatus) {
-      memoryStr = formatMemoryBytes(nativeStatus.memory);
-      goroutinesStr = String(nativeStatus.goroutines);
-    }
-  } else if (isClashSource) {
-    uploadRateStr = clashTraffic.upStr;
-    downloadRateStr = clashTraffic.downStr;
-    uploadTotalStr = clashConn.upTotal;
-    downloadTotalStr = clashConn.dlTotal;
-    connectionsLabel = t('Active Connections');
-    connectionsStr = String(clashConn.connNumber);
-    memoryStr = clashConn.mTotal;
-    goroutinesStr = '--';
-  }
-
+  const { upStr, downStr } = useSpeed(apiConfig);
+  const { upTotal, dlTotal, connNumber, mTotal } = useConnection(apiConfig);
   return (
     <div className={s0.TrafficNow}>
       <div className={s0.sec}>
         <div>{t('Upload')}</div>
-        <div>{uploadRateStr}</div>
+        <div>{upStr}</div>
       </div>
       <div className={s0.sec}>
         <div>{t('Download')}</div>
-        <div>{downloadRateStr}</div>
+        <div>{downStr}</div>
       </div>
       <div className={s0.sec}>
         <div>{t('Upload Total')}</div>
-        <div>{uploadTotalStr}</div>
+        <div>{upTotal}</div>
       </div>
       <div className={s0.sec}>
         <div>{t('Download Total')}</div>
-        <div>{downloadTotalStr}</div>
+        <div>{dlTotal}</div>
       </div>
       <div className={s0.sec}>
-        <div>{connectionsLabel}</div>
-        {isNativeSource ? (
-          <div className={s0.connDualRow}>
-            <div className={s0.connRow}>{`In: ${connectionsInStr}`}</div>
-            <div className={s0.connRow}>{`Out: ${connectionsOutStr}`}</div>
-          </div>
-        ) : (
-          <div>{connectionsStr}</div>
-        )}
+        <div>{t('Active Connections')}</div>
+        <div>{connNumber}</div>
       </div>
       <div className={s0.sec}>
         <div>{t('Memory Total')}</div>
-        <div>{memoryStr}</div>
-      </div>
-      <div className={s0.sec}>
-        <div>{t('goroutines')}</div>
-        <div>{goroutinesStr}</div>
+        <div>{mTotal}</div>
       </div>
     </div>
   );
 }
 
-function useClashTraffic(apiConfig: ClashAPIConfig | undefined, enabled: boolean) {
+function useSpeed(apiConfig: ClashAPIConfig) {
   const [speed, setSpeed] = useState({ upStr: '0 B/s', downStr: '0 B/s' });
   useEffect(() => {
-    if (!enabled || !apiConfig || !apiConfig.baseURL) return;
-    const sub = trafficAPI.fetchData(apiConfig).subscribe((o: { up: number; down: number }) => {
+    return fetchData(apiConfig).subscribe((o) =>
       setSpeed({
-        upStr: `${prettyBytes(o.up)}/s`,
-        downStr: `${prettyBytes(o.down)}/s`,
-      });
-    });
-    return () => {
-      if (typeof sub === 'function') {
-        sub();
-      } else if (sub && typeof (sub as any).unsubscribe === 'function') {
-        (sub as any).unsubscribe();
-      }
-    };
-  }, [apiConfig, enabled]);
+        upStr: prettyBytes(o.up) + '/s',
+        downStr: prettyBytes(o.down) + '/s',
+      }),
+    );
+  }, [apiConfig]);
   return speed;
 }
 
-function useClashConnections(apiConfig: ClashAPIConfig | undefined, enabled: boolean) {
+function useConnection(apiConfig: ClashAPIConfig) {
   const [state, setState] = useState({
     upTotal: '0 B',
     dlTotal: '0 B',
@@ -165,20 +73,18 @@ function useClashConnections(apiConfig: ClashAPIConfig | undefined, enabled: boo
     mTotal: '0 B',
   });
   const read = useCallback(
-    ({ downloadTotal, uploadTotal, connections, memory }: any) => {
+    ({ downloadTotal, uploadTotal, connections, memory }) => {
       setState({
         upTotal: prettyBytes(uploadTotal),
         dlTotal: prettyBytes(downloadTotal),
-        connNumber: Array.isArray(connections) ? connections.length : 0,
+        connNumber: connections.length,
         mTotal: prettyBytes(memory),
       });
     },
     [setState],
   );
   useEffect(() => {
-    if (!enabled || !apiConfig || !apiConfig.baseURL) return;
     return connAPI.fetchData(apiConfig, read);
-  }, [apiConfig, enabled, read]);
+  }, [apiConfig, read]);
   return state;
 }
-
