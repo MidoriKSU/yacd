@@ -181,10 +181,22 @@ export class SingBoxClient {
   private streamGeneration = 0;
   private lastStatusAt = 0;
   private statusCount = 0;
+  private streamMessageCount = 0;
+  private lastStreamMessageAt = 0;
+  private trafficNowSubscriberCount = 0;
+  private lastTrafficNowSubscriberAt = 0;
+  private trafficChartSubscriberCount = 0;
+  private lastTrafficChartSubscriberAt = 0;
+  private memoryChartSubscriberCount = 0;
+  private lastMemoryChartSubscriberAt = 0;
+  private chartSubscriberErrors = 0;
   private reconnectCount = 0;
   private lastConnectAttemptAt = 0;
   private lifecycleBound = false;
   private isSuspended = false;
+  private watchdogDueAt = 0;
+  private reconnectDueAt = 0;
+  private lastLifecycleEvent = '';
 
   private phase: SingBoxConnectionPhase = 'unconfigured';
   private error?: string;
@@ -200,23 +212,13 @@ export class SingBoxClient {
     labels: this.chartLabels,
     up: this.chartUp,
     down: this.chartDown,
-    subscribe: (fn: () => void) => {
-      this.chartListeners.add(fn);
-      return () => {
-        this.chartListeners.delete(fn);
-      };
-    },
+    subscribe: (fn: () => void) => this.subscribeChart('traffic', fn),
   };
 
   public readonly memoryChartSource: MemoryChartSource = {
     labels: this.chartLabels,
     inuse: this.chartInuse,
-    subscribe: (fn: () => void) => {
-      this.chartListeners.add(fn);
-      return () => {
-        this.chartListeners.delete(fn);
-      };
-    },
+    subscribe: (fn: () => void) => this.subscribeChart('memory', fn),
   };
 
   private endpoint = '';
@@ -235,6 +237,9 @@ export class SingBoxClient {
     }
 
     this.initLifecycleListeners();
+    if (typeof window !== 'undefined') {
+      (window as any).__SINGBOX_STREAM_DIAG__ = () => this.getDiagnostics();
+    }
   }
 
   public getSnapshot(): SingBoxSnapshot {
@@ -325,11 +330,39 @@ export class SingBoxClient {
     };
   }
 
+  public recordTrafficNowSubscriberExecution() {
+    this.trafficNowSubscriberCount++;
+    this.lastTrafficNowSubscriberAt = Date.now();
+  }
+
+  private subscribeChart(kind: 'traffic' | 'memory', listener: () => void): () => void {
+    const wrapped = () => {
+      const now = Date.now();
+      if (kind === 'traffic') {
+        this.trafficChartSubscriberCount++;
+        this.lastTrafficChartSubscriberAt = now;
+      } else {
+        this.memoryChartSubscriberCount++;
+        this.lastMemoryChartSubscriberAt = now;
+      }
+      try {
+        listener();
+      } catch {
+        this.chartSubscriberErrors++;
+      }
+    };
+    this.chartListeners.add(wrapped);
+    return () => {
+      this.chartListeners.delete(wrapped);
+    };
+  }
+
   private initLifecycleListeners() {
     if (typeof document === 'undefined' || this.lifecycleBound) return;
     this.lifecycleBound = true;
 
     const onActive = () => {
+      this.lastLifecycleEvent = 'active';
       this.isSuspended = false;
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
@@ -348,6 +381,7 @@ export class SingBoxClient {
     };
 
     const onSuspend = () => {
+      this.lastLifecycleEvent = 'suspend';
       this.isSuspended = true;
       this.closeExisting();
       if (this.phase === 'connecting' || this.phase === 'connected') {
@@ -399,10 +433,12 @@ export class SingBoxClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.reconnectDueAt = 0;
     if (this.watchdogTimer) {
       clearTimeout(this.watchdogTimer);
       this.watchdogTimer = null;
     }
+    this.watchdogDueAt = 0;
   }
 
   private armWatchdog(timeoutMs = 5000) {
@@ -415,8 +451,10 @@ export class SingBoxClient {
     }
     if (!this.endpoint) return;
 
+    this.watchdogDueAt = Date.now() + timeoutMs;
     this.watchdogTimer = setTimeout(() => {
       this.watchdogTimer = null;
+      this.watchdogDueAt = 0;
       if (this.isSuspended || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
         return;
       }
@@ -436,13 +474,31 @@ export class SingBoxClient {
   public getDiagnostics() {
     return {
       streamGeneration: this.streamGeneration,
+      streamMessageCount: this.streamMessageCount,
+      lastStreamMessageAt: this.lastStreamMessageAt,
+      onNewStatusCount: this.statusCount,
+      lastStatusAt: this.lastStatusAt,
+      trafficNowSubscriberCount: this.trafficNowSubscriberCount,
+      lastTrafficNowSubscriberAt: this.lastTrafficNowSubscriberAt,
+      trafficChartSubscriberCount: this.trafficChartSubscriberCount,
+      lastTrafficChartSubscriberAt: this.lastTrafficChartSubscriberAt,
+      memoryChartSubscriberCount: this.memoryChartSubscriberCount,
+      lastMemoryChartSubscriberAt: this.lastMemoryChartSubscriberAt,
+      chartSubscriberErrors: this.chartSubscriberErrors,
+      snapshotListeners: this.listeners.size,
+      chartListeners: this.chartListeners.size,
       phase: this.phase,
       endpoint: this.endpoint,
-      lastStatusAt: this.lastStatusAt,
-      statusCount: this.statusCount,
+      abortControllerPresent: Boolean(this.abortController),
+      abortControllerAborted: this.abortController?.signal.aborted ?? false,
+      isSuspended: this.isSuspended,
       reconnectCount: this.reconnectCount,
       reconnectTimerActive: Boolean(this.reconnectTimer),
+      reconnectDueAt: this.reconnectDueAt,
       watchdogTimerActive: Boolean(this.watchdogTimer),
+      watchdogDueAt: this.watchdogDueAt,
+      lastConnectAttemptAt: this.lastConnectAttemptAt,
+      lastLifecycleEvent: this.lastLifecycleEvent,
       visibilityState: typeof document !== 'undefined' ? document.visibilityState : 'unknown',
     };
   }
@@ -500,6 +556,8 @@ export class SingBoxClient {
         if (generation !== this.streamGeneration || controller.signal.aborted) {
           break;
         }
+        this.streamMessageCount++;
+        this.lastStreamMessageAt = Date.now();
         this.phase = 'connected';
         this.error = undefined;
         if (this.reconnectTimer) {
@@ -530,6 +588,7 @@ export class SingBoxClient {
           clearTimeout(this.watchdogTimer);
           this.watchdogTimer = null;
         }
+        this.watchdogDueAt = 0;
         this.notify();
         this.scheduleReconnect();
       }
@@ -543,6 +602,7 @@ export class SingBoxClient {
         clearTimeout(this.watchdogTimer);
         this.watchdogTimer = null;
       }
+      this.watchdogDueAt = 0;
       this.notify();
       this.scheduleReconnect();
     }
@@ -587,8 +647,10 @@ export class SingBoxClient {
     if (!this.endpoint || this.isSuspended) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     if (this.reconnectTimer) return;
+    this.reconnectDueAt = Date.now() + 5000;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      this.reconnectDueAt = 0;
       this.startConnection();
     }, 5000);
   }
