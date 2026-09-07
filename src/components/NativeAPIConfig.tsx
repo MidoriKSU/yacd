@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { ChevronLeft } from 'react-feather';
 import { Link } from 'react-router-dom';
-import { testNativeConnection } from 'src/api/singbox';
+import { testNativeConnection, validateEndpoint } from 'src/api/singbox';
 import { NativeBackendList } from 'src/components/NativeBackendList';
 import { ThemeSwitcher } from 'src/components/shared/ThemeSwitcher';
 import { addNativeAPIConfig, getNativeAPIConfig } from 'src/store/app';
@@ -49,17 +49,19 @@ function NativeAPIConfig({ dispatch }: { dispatch: DispatchFn }) {
 
   const onConfirm = useCallback(() => {
     const trimmed = (baseURL || '').trim();
-    if (!trimmed) {
-      setErrMsg('Invalid URL');
+    const validation = validateEndpoint(trimmed);
+    if (!validation.valid) {
+      setErrMsg(validation.error || 'Invalid URL');
       return;
     }
+    const normalizedURL = validation.url!;
     setIsVerifying(true);
-    testNativeConnection(trimmed, secret).then((ret) => {
+    testNativeConnection(normalizedURL, secret).then((ret) => {
       setIsVerifying(false);
       if (!ret.ok) {
         setErrMsg(ret.error || 'Failed to connect');
       } else {
-        dispatch(addNativeAPIConfig({ baseURL: trimmed, secret, metaLabel }));
+        dispatch(addNativeAPIConfig({ baseURL: normalizedURL, secret, metaLabel }));
         setBaseURL('');
         setSecret('');
         setMetaLabel('');

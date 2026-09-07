@@ -91,22 +91,22 @@ export interface EndpointValidationResult {
 export function validateEndpoint(raw: string): EndpointValidationResult {
   const trimmed = (raw || '').trim();
   if (!trimmed || /^https?:\/*$/i.test(trimmed)) {
-    return { valid: false, error: 'Endpoint is empty or missing host' };
+    return { valid: false, error: 'Invalid URL' };
   }
   const normalized = normalizeEndpoint(trimmed);
   let parsed: URL;
   try {
     parsed = new URL(normalized);
   } catch {
-    return { valid: false, error: 'Invalid URL format' };
+    return { valid: false, error: 'Invalid URL' };
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { valid: false, error: 'Unsupported scheme (must be http:// or https://)' };
+    return { valid: false, error: 'Invalid URL' };
   }
 
   if (!parsed.hostname) {
-    return { valid: false, error: 'Missing host in endpoint URL' };
+    return { valid: false, error: 'Invalid URL' };
   }
 
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -146,10 +146,11 @@ export async function testNativeConnection(
   apiVersion?: number;
   error?: string;
 }> {
-  const normalized = normalizeEndpoint(targetUrl);
-  if (!normalized) {
-    return { ok: false, error: 'Endpoint is not configured' };
+  const validation = validateEndpoint(targetUrl);
+  if (!validation.valid) {
+    return { ok: false, error: validation.error || 'Invalid URL' };
   }
+  const normalized = validation.url!;
   try {
     const transport = createGrpcWebTransport({
       baseUrl: normalized,

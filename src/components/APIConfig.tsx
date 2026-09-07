@@ -1,7 +1,7 @@
 import cx from 'clsx';
 import * as React from 'react';
 import { fetchConfigs } from 'src/api/configs';
-import { testNativeConnection } from 'src/api/singbox';
+import { testNativeConnection, validateEndpoint } from 'src/api/singbox';
 import { BackendList } from 'src/components/BackendList';
 import { NativeBackendList } from 'src/components/NativeBackendList';
 import {
@@ -102,17 +102,19 @@ function APIConfig({
 
   const onConfirmNative = useCallback(() => {
     const trimmed = (baseURL || '').trim();
-    if (!trimmed) {
-      setErrMsg('Invalid URL');
+    const validation = validateEndpoint(trimmed);
+    if (!validation.valid) {
+      setErrMsg(validation.error || 'Invalid URL');
       return;
     }
+    const normalizedURL = validation.url!;
     setIsVerifying(true);
-    testNativeConnection(trimmed, secret).then((ret) => {
+    testNativeConnection(normalizedURL, secret).then((ret) => {
       setIsVerifying(false);
       if (!ret.ok) {
         setErrMsg(ret.error || 'Failed to connect');
       } else {
-        dispatch(addNativeAPIConfig({ baseURL: trimmed, secret, metaLabel }));
+        dispatch(addNativeAPIConfig({ baseURL: normalizedURL, secret, metaLabel }));
         dispatch(closeModal('apiConfig'));
         setBaseURL('');
         setSecret('');

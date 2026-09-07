@@ -5,6 +5,7 @@ import {
   DownloadCloud,
   LogOut,
   RotateCw,
+  Sliders,
   Trash2,
 } from 'react-feather';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +24,7 @@ import {
   getNativeAPIConfig,
   getSelectedChartStyleIndex,
   getSingBoxConfig,
+  hasSelectedNativeBackend,
 } from '../store/app';
 import { fetchConfigs, flushFakeIPPool, getConfigs, reloadConfigs, updateConfigs, updateGeoDatabasesFile } from '../store/configs';
 import { openModal } from '../store/modals';
@@ -71,6 +73,7 @@ const mapState2 = (s: State) => ({
   apiConfig: getClashAPIConfig(s),
   singBoxConfig: getSingBoxConfig(s),
   nativeAPIConfig: getNativeAPIConfig(s),
+  hasNativeBackend: hasSelectedNativeBackend(s),
 });
 
 const Config = connect(mapState2)(ConfigImpl);
@@ -101,6 +104,7 @@ type ConfigImplProps = {
   apiConfig?: ClashAPIConfig;
   singBoxConfig: SingBoxConfig;
   nativeAPIConfig?: NativeAPIConfig;
+  hasNativeBackend: boolean;
 };
 
 function getBackendContent(version: any): string {
@@ -121,6 +125,7 @@ function ConfigImpl({
   apiConfig,
   singBoxConfig,
   nativeAPIConfig,
+  hasNativeBackend,
 }: ConfigImplProps) {
   const navigate = useNavigate();
   const [configState, setConfigStateInternal] = useState(configs);
@@ -420,19 +425,21 @@ function ConfigImpl({
           <div className={s0.label}>
             Native API
             <p>
-              {nativeAPIConfig?.metaLabel ? (
+              {hasNativeBackend && nativeAPIConfig?.metaLabel ? (
                 <>
                   <span>{nativeAPIConfig.metaLabel}</span>
                   <br />
                 </>
               ) : null}
-              {nativeAPIConfig?.baseURL || singBoxConfig?.endpoint || (t('unconfigured') || 'Not configured')}
+              {hasNativeBackend && (nativeAPIConfig?.baseURL || singBoxConfig?.endpoint)
+                ? nativeAPIConfig?.baseURL || singBoxConfig?.endpoint
+                : t('unconfigured') || 'Not configured'}
             </p>
           </div>
           <div className={s0.label}>Action</div>
           <Button
-            start={<LogOut size={16} />}
-            label={t('switch_backend')}
+            start={hasNativeBackend ? <LogOut size={16} /> : <Sliders size={16} />}
+            label={hasNativeBackend ? t('switch_backend') : (t('configure') || 'Configure')}
             onClick={() => navigate('/backend-native')}
           />
         </div>

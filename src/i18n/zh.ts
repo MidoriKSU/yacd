@@ -57,6 +57,7 @@ export const data = {
   disconnected: '已断开',
   auth_failed: '认证失败',
   unconfigured: '未配置',
+  configure: '配置',
   blocked: '已拦截 (Blocked)',
   mixed_content_title: 'HTTPS 控制面板无法直接访问 HTTP Service API。',
   mixed_content_desc: '请使用 HTTPS，或直接从 sing-box 托管的外部 UI 打开 yacd。',

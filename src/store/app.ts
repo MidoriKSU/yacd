@@ -20,17 +20,22 @@ export const getClashAPIConfig = (s: State): ClashAPIConfig | undefined => {
 export const getSelectedClashAPIConfigIndex = (s: State) => s.app.selectedClashAPIConfigIndex ?? 0;
 export const getClashAPIConfigs = (s: State) => s.app.clashAPIConfigs || [];
 export const getNativeAPIConfig = (s: State): NativeAPIConfig | undefined => {
+  const configs = s.app.nativeAPIConfigs;
+  if (!Array.isArray(configs) || configs.length === 0) return undefined;
   const idx = s.app.selectedNativeAPIConfigIndex ?? 0;
-  return s.app.nativeAPIConfigs?.[idx];
+  return configs[idx] || configs[0];
 };
 export const getSelectedNativeAPIConfigIndex = (s: State) => s.app.selectedNativeAPIConfigIndex ?? 0;
 export const getNativeAPIConfigs = (s: State) => s.app.nativeAPIConfigs || [];
 export const getSingBoxConfig = (s: State): SingBoxConfig => {
-  const native = s.app.nativeAPIConfigs?.[s.app.selectedNativeAPIConfigIndex];
-  if (native) {
-    return { endpoint: native.baseURL, secret: native.secret };
+  const native = getNativeAPIConfig(s);
+  if (native && native.baseURL) {
+    return { endpoint: native.baseURL, secret: native.secret || '' };
   }
-  return s.app.singBoxConfig || singBoxClient.getCustomConfig();
+  if (s.app.singBoxConfig && s.app.singBoxConfig.endpoint) {
+    return s.app.singBoxConfig;
+  }
+  return { endpoint: '', secret: '' };
 };
 
 export const hasSelectedClashBackend = (s: State): boolean => {
@@ -45,7 +50,7 @@ export const hasSelectedNativeBackend = (s: State): boolean => {
   const configs = s.app.nativeAPIConfigs;
   if (Array.isArray(configs) && configs.length > 0) {
     const idx = s.app.selectedNativeAPIConfigIndex ?? 0;
-    const conf = configs[idx];
+    const conf = configs[idx] || configs[0];
     if (conf && typeof conf.baseURL === 'string' && conf.baseURL.trim() !== '') return true;
   }
   if (
@@ -55,7 +60,7 @@ export const hasSelectedNativeBackend = (s: State): boolean => {
   ) {
     return true;
   }
-  return singBoxClient.getSnapshot().isConfigured;
+  return false;
 };
 
 export const hasAnyConfiguredBackend = (s: State): boolean => {
@@ -151,11 +156,12 @@ function findNativeAPIConfigIndex(
   getState: GetStateFn,
   { baseURL, secret, metaLabel }: NativeAPIConfig,
 ) {
+  const normBase = normalizeEndpoint(baseURL);
   const arr = getNativeAPIConfigs(getState());
   for (let i = 0; i < arr.length; i++) {
     const x = arr[i];
     if (
-      x.baseURL === baseURL &&
+      normalizeEndpoint(x.baseURL) === normBase &&
       (x.secret || '') === (secret || '') &&
       (x.metaLabel || '') === (metaLabel || '')
     ) {
@@ -167,23 +173,25 @@ function findNativeAPIConfigIndex(
 
 export function addNativeAPIConfig(conf: NativeAPIConfig) {
   return async (dispatch: DispatchFn, getState: GetStateFn) => {
-    const idx = findNativeAPIConfigIndex(getState, conf);
+    const normalizedBaseURL = normalizeEndpoint(conf.baseURL);
+    const normalizedConf = { ...conf, baseURL: normalizedBaseURL };
+    const idx = findNativeAPIConfigIndex(getState, normalizedConf);
     // already exists
     if (idx !== -1) return;
 
-    const nativeAPIConfig = { ...conf, addedAt: Date.now() };
+    const nativeAPIConfig = { ...normalizedConf, addedAt: Date.now() };
     dispatch('addNativeAPIConfig', (s) => {
       s.app.nativeAPIConfigs = s.app.nativeAPIConfigs || [];
       s.app.nativeAPIConfigs.push(nativeAPIConfig);
       if (s.app.nativeAPIConfigs.length === 1) {
         s.app.selectedNativeAPIConfigIndex = 0;
-        s.app.singBoxConfig = { endpoint: conf.baseURL, secret: conf.secret || '' };
+        s.app.singBoxConfig = { endpoint: normalizedBaseURL, secret: conf.secret || '' };
       }
     });
     // side effect
     saveState(getState().app);
     if (getState().app.nativeAPIConfigs.length === 1) {
-      singBoxClient.setCustomConfig({ endpoint: conf.baseURL, secret: conf.secret || '' });
+      singBoxClient.setCustomConfig({ endpoint: normalizedBaseURL, secret: conf.secret || '' });
     }
   };
 }

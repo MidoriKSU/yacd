@@ -55,6 +55,7 @@ export const data = {
   disconnected: 'Disconnected',
   auth_failed: 'Authentication Failed',
   unconfigured: 'Not Configured',
+  configure: 'Configure',
   blocked: 'Blocked',
   mixed_content_title: 'HTTPS dashboard cannot access an HTTP Service API.',
   mixed_content_desc: 'Use HTTPS, or open yacd from the sing-box-hosted external UI.',
