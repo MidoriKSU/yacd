@@ -13,7 +13,7 @@ import Field from './Field';
 import { connect } from './StateProvider';
 import SvgYacd from './SvgYacd';
 
-const { useState, useRef, useCallback } = React;
+const { useState, useCallback } = React;
 
 const mapState = (s: State) => ({
   nativeAPIConfig: getNativeAPIConfig(s),
@@ -25,8 +25,6 @@ function NativeAPIConfig({ dispatch }: { dispatch: DispatchFn }) {
   const [metaLabel, setMetaLabel] = useState('');
   const [errMsg, setErrMsg] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
-
-  const contentEl = useRef<HTMLDivElement | null>(null);
 
   const handleInputOnChange = useCallback<React.ChangeEventHandler<HTMLInputElement>>((e) => {
     setErrMsg('');
@@ -47,41 +45,47 @@ function NativeAPIConfig({ dispatch }: { dispatch: DispatchFn }) {
     }
   }, []);
 
-  const onConfirm = useCallback(() => {
-    const trimmed = (baseURL || '').trim();
-    const validation = validateEndpoint(trimmed);
-    if (!validation.valid) {
-      setErrMsg(validation.error || 'Invalid URL');
-      return;
-    }
-    const normalizedURL = validation.url!;
-    setIsVerifying(true);
-    testNativeConnection(normalizedURL, secret).then((ret) => {
-      setIsVerifying(false);
-      if (!ret.ok) {
-        setErrMsg(ret.error || 'Failed to connect');
-      } else {
-        dispatch(addNativeAPIConfig({ baseURL: normalizedURL, secret, metaLabel }));
-        setBaseURL('');
-        setSecret('');
-        setMetaLabel('');
-      }
-    });
-  }, [baseURL, secret, metaLabel, dispatch]);
+  const onSubmit = useCallback(
+    (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
 
-  const handleContentOnKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (
-        e.target instanceof Element &&
-        (!e.target.tagName || e.target.tagName.toUpperCase() !== 'INPUT')
-      ) {
+      const data = new FormData(e.currentTarget);
+
+      const rawBaseURL = String(data.get('baseURL') || '');
+      const rawSecret = String(data.get('secret') || '');
+      const rawMetaLabel = String(data.get('metaLabel') || '');
+
+      setBaseURL(rawBaseURL);
+      setSecret(rawSecret);
+      setMetaLabel(rawMetaLabel);
+
+      const trimmed = rawBaseURL.trim();
+      const validation = validateEndpoint(trimmed);
+
+      if (!validation.valid) {
+        setErrMsg(validation.error || 'Invalid URL');
         return;
       }
-      if (e.key !== 'Enter') return;
-
-      onConfirm();
+      const normalizedURL = validation.url!;
+      setIsVerifying(true);
+      testNativeConnection(normalizedURL, rawSecret)
+        .then((ret) => {
+          setIsVerifying(false);
+          if (!ret.ok) {
+            setErrMsg(ret.error || 'Failed to connect');
+          } else {
+            dispatch(addNativeAPIConfig({ baseURL: normalizedURL, secret: rawSecret, metaLabel: rawMetaLabel }));
+            setBaseURL('');
+            setSecret('');
+            setMetaLabel('');
+          }
+        })
+        .catch((err) => {
+          setIsVerifying(false);
+          setErrMsg(err?.message || 'Failed to connect');
+        });
     },
-    [onConfirm],
+    [dispatch],
   );
 
   return (
@@ -92,53 +96,53 @@ function NativeAPIConfig({ dispatch }: { dispatch: DispatchFn }) {
           <span>Config</span>
         </Link>
       </div>
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
-      <div className={s0.container} ref={contentEl} onKeyDown={handleContentOnKeyDown}>
+      <div className={s0.container}>
         <div className={s0.header}>
           <div className={s0.icon}>
             <SvgYacd width={160} height={160} stroke="var(--stroke)" />
           </div>
         </div>
-        <div className={s0.body}>
-          <div className={s0.hostnamePort}>
-            <Field
-              id="baseURL"
-              name="baseURL"
-              label="Native API Base URL"
-              type="text"
-              placeholder="http://127.0.0.1:9080"
-              value={baseURL}
-              onChange={handleInputOnChange}
-            />
-            <Field
-              id="secret"
-              name="secret"
-              label="Secret(optional)"
-              value={secret}
-              type="text"
-              onChange={handleInputOnChange}
+        <form onSubmit={onSubmit}>
+          <div className={s0.body}>
+            <div className={s0.hostnamePort}>
+              <Field
+                id="baseURL"
+                name="baseURL"
+                label="Native API Base URL"
+                type="text"
+                placeholder="http://127.0.0.1:9080"
+                value={baseURL}
+                onChange={handleInputOnChange}
+              />
+              <Field
+                id="secret"
+                name="secret"
+                label="Secret(optional)"
+                value={secret}
+                type="text"
+                onChange={handleInputOnChange}
+              />
+            </div>
+            {errMsg ? <div className={s0.error}>{errMsg}</div> : null}
+            <div className={s0.label}>
+              <Field
+                id="metaLabel"
+                name="metaLabel"
+                label="Label(optional)"
+                type="text"
+                placeholder=""
+                value={metaLabel}
+                onChange={handleInputOnChange}
+              />
+            </div>
+          </div>
+          <div className={s0.footer}>
+            <Button
+              label={isVerifying ? 'Verifying...' : 'Add'}
+              disabled={isVerifying}
             />
           </div>
-          {errMsg ? <div className={s0.error}>{errMsg}</div> : null}
-          <div className={s0.label}>
-            <Field
-              id="metaLabel"
-              name="metaLabel"
-              label="Label(optional)"
-              type="text"
-              placeholder=""
-              value={metaLabel}
-              onChange={handleInputOnChange}
-            />
-          </div>
-        </div>
-        <div className={s0.footer}>
-          <Button
-            label={isVerifying ? 'Verifying...' : 'Add'}
-            onClick={onConfirm}
-            disabled={isVerifying}
-          />
-        </div>
+        </form>
         <div style={{ height: 20 }} />
         <NativeBackendList />
       </div>

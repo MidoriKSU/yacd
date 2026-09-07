@@ -22,7 +22,7 @@ import Field from './Field';
 import { connect } from './StateProvider';
 import SvgYacd from './SvgYacd';
 
-const { useState, useRef, useCallback, useEffect } = React;
+const { useState, useCallback, useEffect } = React;
 const Ok = 0;
 
 // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -56,11 +56,7 @@ function APIConfig({
   const [errMsg, setErrMsg] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const userTouchedFlagRef = useRef(false);
-  const contentEl = useRef<HTMLDivElement | null>(null);
-
   const handleInputOnChange = useCallback<React.ChangeEventHandler<HTMLInputElement>>((e) => {
-    userTouchedFlagRef.current = true;
     setErrMsg('');
     const target = e.target;
     const { name, value } = target;
@@ -79,71 +75,85 @@ function APIConfig({
     }
   }, []);
 
-  const onConfirmClash = useCallback(() => {
-    const normalized = normalizeClashURL(baseURL);
-    if (!normalized) {
-      setErrMsg('Invalid URL');
-      return;
-    }
-    setIsVerifying(true);
-    verify({ baseURL: normalized, secret }).then((ret) => {
-      setIsVerifying(false);
-      if (ret[0] !== Ok) {
-        setErrMsg(ret[1] || 'Failed to connect');
+  const onSubmit = useCallback(
+    (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+
+      const data = new FormData(e.currentTarget);
+
+      const rawBaseURL = String(data.get('baseURL') || '');
+      const rawSecret = String(data.get('secret') || '');
+      const rawMetaLabel = String(data.get('metaLabel') || '');
+
+      setBaseURL(rawBaseURL);
+      setSecret(rawSecret);
+      setMetaLabel(rawMetaLabel);
+
+      if (activeTab === 'native') {
+        const trimmed = rawBaseURL.trim();
+        const validation = validateEndpoint(trimmed);
+        if (!validation.valid) {
+          setErrMsg(validation.error || 'Invalid URL');
+          return;
+        }
+        const normalizedURL = validation.url!;
+        setIsVerifying(true);
+        testNativeConnection(normalizedURL, rawSecret)
+          .then((ret) => {
+            setIsVerifying(false);
+            if (!ret.ok) {
+              setErrMsg(ret.error || 'Failed to connect');
+            } else {
+              dispatch(
+                addNativeAPIConfig({
+                  baseURL: normalizedURL,
+                  secret: rawSecret,
+                  metaLabel: rawMetaLabel,
+                }),
+              );
+              dispatch(closeModal('apiConfig'));
+              setBaseURL('');
+              setSecret('');
+              setMetaLabel('');
+            }
+          })
+          .catch((err) => {
+            setIsVerifying(false);
+            setErrMsg(err?.message || 'Failed to connect');
+          });
       } else {
-        dispatch(addClashAPIConfig({ baseURL: normalized, secret, metaLabel }));
-        dispatch(closeModal('apiConfig'));
-        setBaseURL('');
-        setSecret('');
-        setMetaLabel('');
+        const normalized = normalizeClashURL(rawBaseURL);
+        if (!normalized) {
+          setErrMsg('Invalid URL');
+          return;
+        }
+        setIsVerifying(true);
+        verify({ baseURL: normalized, secret: rawSecret })
+          .then((ret) => {
+            setIsVerifying(false);
+            if (ret[0] !== Ok) {
+              setErrMsg(ret[1] || 'Failed to connect');
+            } else {
+              dispatch(
+                addClashAPIConfig({
+                  baseURL: normalized,
+                  secret: rawSecret,
+                  metaLabel: rawMetaLabel,
+                }),
+              );
+              dispatch(closeModal('apiConfig'));
+              setBaseURL('');
+              setSecret('');
+              setMetaLabel('');
+            }
+          })
+          .catch((err) => {
+            setIsVerifying(false);
+            setErrMsg(err?.message || 'Failed to connect');
+          });
       }
-    });
-  }, [baseURL, secret, metaLabel, dispatch]);
-
-  const onConfirmNative = useCallback(() => {
-    const trimmed = (baseURL || '').trim();
-    const validation = validateEndpoint(trimmed);
-    if (!validation.valid) {
-      setErrMsg(validation.error || 'Invalid URL');
-      return;
-    }
-    const normalizedURL = validation.url!;
-    setIsVerifying(true);
-    testNativeConnection(normalizedURL, secret).then((ret) => {
-      setIsVerifying(false);
-      if (!ret.ok) {
-        setErrMsg(ret.error || 'Failed to connect');
-      } else {
-        dispatch(addNativeAPIConfig({ baseURL: normalizedURL, secret, metaLabel }));
-        dispatch(closeModal('apiConfig'));
-        setBaseURL('');
-        setSecret('');
-        setMetaLabel('');
-      }
-    });
-  }, [baseURL, secret, metaLabel, dispatch]);
-
-  const onConfirm = useCallback(() => {
-    if (activeTab === 'native') {
-      onConfirmNative();
-    } else {
-      onConfirmClash();
-    }
-  }, [activeTab, onConfirmNative, onConfirmClash]);
-
-  const handleContentOnKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (
-        e.target instanceof Element &&
-        (!e.target.tagName || e.target.tagName.toUpperCase() !== 'INPUT')
-      ) {
-        return;
-      }
-      if (e.key !== 'Enter') return;
-
-      onConfirm();
     },
-    [onConfirm],
+    [activeTab, dispatch],
   );
 
   const detectApiServer = async () => {
@@ -165,8 +175,7 @@ function APIConfig({
   }, [activeTab]);
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-    <div className={s0.root} ref={contentEl} onKeyDown={handleContentOnKeyDown}>
+    <div className={s0.root}>
       <div className={s0.header}>
         <div className={s0.icon}>
           <SvgYacd width={160} height={160} stroke="var(--stroke)" />
@@ -202,42 +211,44 @@ function APIConfig({
         </button>
       </div>
 
-      <div className={s0.body}>
-        <div className={s0.hostnamePort}>
-          <Field
-            id="baseURL"
-            name="baseURL"
-            label={activeTab === 'native' ? 'Native API Base URL' : 'API Base URL'}
-            type="text"
-            placeholder={activeTab === 'native' ? 'http://127.0.0.1:9080' : 'http://127.0.0.1:9090'}
-            value={baseURL}
-            onChange={handleInputOnChange}
-          />
-          <Field
-            id="secret"
-            name="secret"
-            label={activeTab === 'native' ? 'Native API Secret (optional)' : 'Secret(optional)'}
-            value={secret}
-            type="text"
-            onChange={handleInputOnChange}
-          />
+      <form onSubmit={onSubmit}>
+        <div className={s0.body}>
+          <div className={s0.hostnamePort}>
+            <Field
+              id="baseURL"
+              name="baseURL"
+              label={activeTab === 'native' ? 'Native API Base URL' : 'API Base URL'}
+              type="text"
+              placeholder={activeTab === 'native' ? 'http://127.0.0.1:9080' : 'http://127.0.0.1:9090'}
+              value={baseURL}
+              onChange={handleInputOnChange}
+            />
+            <Field
+              id="secret"
+              name="secret"
+              label={activeTab === 'native' ? 'Native API Secret (optional)' : 'Secret(optional)'}
+              value={secret}
+              type="text"
+              onChange={handleInputOnChange}
+            />
+          </div>
+          {errMsg ? <div className={s0.error}>{errMsg}</div> : null}
+          <div className={s0.label}>
+            <Field
+              id="metaLabel"
+              name="metaLabel"
+              label="Label(optional)"
+              type="text"
+              placeholder=""
+              value={metaLabel}
+              onChange={handleInputOnChange}
+            />
+          </div>
         </div>
-        {errMsg ? <div className={s0.error}>{errMsg}</div> : null}
-        <div className={s0.label}>
-          <Field
-            id="metaLabel"
-            name="metaLabel"
-            label="Label(optional)"
-            type="text"
-            placeholder=""
-            value={metaLabel}
-            onChange={handleInputOnChange}
-          />
+        <div className={s0.footer}>
+          <Button label="Add" isLoading={isVerifying} disabled={isVerifying} />
         </div>
-      </div>
-      <div className={s0.footer}>
-        <Button label="Add" onClick={onConfirm} isLoading={isVerifying} />
-      </div>
+      </form>
       <div style={{ height: 20 }} />
       {activeTab === 'native' ? <NativeBackendList /> : <BackendList />}
     </div>
