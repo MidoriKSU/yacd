@@ -46,7 +46,6 @@ function TrafficNow({
     if (!isNativeSource) return;
     setSnapshot(singBoxClient.getSnapshot());
     return singBoxClient.subscribe((s) => {
-      singBoxClient.recordTrafficNowSubscriberExecution();
       setSnapshot(s);
     });
   }, [isNativeSource]);
