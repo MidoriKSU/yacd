@@ -3,8 +3,6 @@ import { createGrpcWebTransport } from '@connectrpc/connect-web';
 
 import { StartedService } from './gen/daemon/started_service_pb.js';
 
-
-
 export interface SingBoxStatus {
   memory: number; // in bytes
   memoryRaw?: bigint;
@@ -186,6 +184,7 @@ export class SingBoxClient {
   private reconnectCount = 0;
   private lastConnectAttemptAt = 0;
   private lifecycleBound = false;
+  private isSuspended = false;
 
   private phase: SingBoxConnectionPhase = 'unconfigured';
   private error?: string;
@@ -236,13 +235,6 @@ export class SingBoxClient {
     }
 
     this.initLifecycleListeners();
-
-    if (this.endpoint) {
-      this.phase = 'connecting';
-      setTimeout(() => this.startConnection(), 0);
-    } else {
-      this.phase = 'unconfigured';
-    }
   }
 
   public getSnapshot(): SingBoxSnapshot {
@@ -338,22 +330,29 @@ export class SingBoxClient {
     this.lifecycleBound = true;
 
     const onActive = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        const now = Date.now();
-        if (now - this.lastConnectAttemptAt < 2000) {
-          return;
-        }
-        const isStale = !this.lastStatusAt || now - this.lastStatusAt > 2500;
-        if (this.endpoint && (this.phase !== 'connected' || isStale)) {
-          this.reconnect();
-        }
+      this.isSuspended = false;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      if (!this.endpoint) return;
+
+      const now = Date.now();
+      if (now - this.lastConnectAttemptAt < 1000) {
+        return;
+      }
+
+      const isStale = !this.lastStatusAt || now - this.lastStatusAt > 2500;
+      if (!this.abortController || this.phase !== 'connected' || isStale) {
+        this.reconnect();
       }
     };
 
     const onSuspend = () => {
-      if (this.watchdogTimer) {
-        clearTimeout(this.watchdogTimer);
-        this.watchdogTimer = null;
+      this.isSuspended = true;
+      this.closeExisting();
+      if (this.phase === 'connecting' || this.phase === 'connected') {
+        this.phase = 'disconnected';
+        this.notify();
       }
     };
 
@@ -375,7 +374,6 @@ export class SingBoxClient {
 
   public reconnect() {
     this.reconnectCount++;
-    this.closeExisting();
     this.startConnection();
   }
 
@@ -407,22 +405,23 @@ export class SingBoxClient {
     }
   }
 
-  private resetWatchdog() {
+  private armWatchdog(timeoutMs = 5000) {
     if (this.watchdogTimer) {
       clearTimeout(this.watchdogTimer);
       this.watchdogTimer = null;
     }
-    if (this.phase === 'connected' && this.endpoint) {
-      this.watchdogTimer = setTimeout(() => {
-        this.watchdogTimer = null;
-        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-          return;
-        }
-        if (this.phase === 'connected') {
-          this.reconnect();
-        }
-      }, 5000);
+    if (this.isSuspended || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+      return;
     }
+    if (!this.endpoint) return;
+
+    this.watchdogTimer = setTimeout(() => {
+      this.watchdogTimer = null;
+      if (this.isSuspended || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+        return;
+      }
+      this.reconnect();
+    }, timeoutMs);
   }
 
   public async testConnection(): Promise<{
@@ -457,6 +456,10 @@ export class SingBoxClient {
       return;
     }
 
+    if (this.isSuspended || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+      return;
+    }
+
     this.lastConnectAttemptAt = Date.now();
     this.closeExisting();
     const generation = this.streamGeneration;
@@ -466,6 +469,9 @@ export class SingBoxClient {
     this.phase = 'connecting';
     this.error = undefined;
     this.notify();
+
+    // Guard connection establishment (10s timeout)
+    this.armWatchdog(10000);
 
     try {
       const secret = this.effectiveSecret();
@@ -552,7 +558,8 @@ export class SingBoxClient {
     this.currentStatus = status;
     this.lastStatusAt = Date.now();
     this.statusCount++;
-    this.resetWatchdog();
+    // Status message received: arm 5s stall watchdog
+    this.armWatchdog(5000);
 
     this.chartLabels.shift();
     this.chartUp.shift();
@@ -577,7 +584,8 @@ export class SingBoxClient {
   }
 
   private scheduleReconnect() {
-    if (!this.endpoint) return;
+    if (!this.endpoint || this.isSuspended) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     if (this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
